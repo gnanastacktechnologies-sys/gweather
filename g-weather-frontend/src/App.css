@@ -397,6 +397,7 @@ body {
 .footer-meta {
   font-size: 0.82rem;
   color: var(--text-muted);
+}
 
 .footer-label {
   margin-right: 6px;
