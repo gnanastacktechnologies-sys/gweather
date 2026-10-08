@@ -16,6 +16,12 @@ app.use(cors());
 // Parse incoming JSON payloads
 app.use(express.json());
 
+// Ensure DB connection before handling requests
+app.use(async (req, res, next) => {
+  await connectDB();
+  next();
+});
+
 // API Routes
 app.use('/api', weatherRoutes);
 
@@ -69,18 +75,21 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Connect to MongoDB first, then start Express server listening on 0.0.0.0
-const startServer = async () => {
-  await connectDB();
-  const HOST = '0.0.0.0';
-  app.listen(PORT, HOST, () => {
-    console.log(`=================================================`);
-    console.log(` G-WEATHER backend running on port ${PORT}`);
-    console.log(` Server listening on ${HOST}:${PORT}`);
-    console.log(` Health Check: http://localhost:${PORT}/api/health`);
-    console.log(` Weather API:  http://localhost:${PORT}/api/weather`);
-    console.log(`=================================================`);
-  });
-};
+// Connect to MongoDB & start server locally
+if (!process.env.VERCEL) {
+  const startServer = async () => {
+    await connectDB();
+    const HOST = '0.0.0.0';
+    app.listen(PORT, HOST, () => {
+      console.log(`=================================================`);
+      console.log(` G-WEATHER backend running on port ${PORT}`);
+      console.log(` Server listening on ${HOST}:${PORT}`);
+      console.log(` Health Check: http://localhost:${PORT}/api/health`);
+      console.log(` Weather API:  http://localhost:${PORT}/api/weather`);
+      console.log(`=================================================`);
+    });
+  };
+  startServer();
+}
 
-startServer();
+export default app;
