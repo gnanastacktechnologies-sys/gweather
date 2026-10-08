@@ -4,6 +4,9 @@ import mongoose from 'mongoose';
 // In-memory fallback telemetry cache (ensures zero 500 errors if DB is offline/unconfigured)
 let inMemoryLatest = null;
 
+// In-memory history buffer (keeps up to 200 recent packets safely)
+let inMemoryHistory = [];
+
 /**
  * GET /api/health
  * Health check endpoint to verify backend status
@@ -81,8 +84,12 @@ export const postWeatherData = async (req, res, next) => {
       receivedAt: new Date()
     };
 
-    // Store in in-memory cache immediately
+    // Store in in-memory cache & history buffer immediately
     inMemoryLatest = payload;
+    inMemoryHistory.unshift(payload);
+    if (inMemoryHistory.length > 200) {
+      inMemoryHistory = inMemoryHistory.slice(0, 200);
+    }
 
     // Persist to MongoDB if connected
     let savedRecord = payload;
@@ -142,11 +149,91 @@ export const getLatestWeather = async (req, res) => {
       data: null
     });
   } catch (error) {
-    // Ultimate safety catch — return 200 with null data rather than crashing
     return res.status(200).json({
       success: true,
       message: "Weather service online, waiting for telemetry",
       data: inMemoryLatest || null
+    });
+  }
+};
+
+/**
+ * GET /api/weather/history
+ * Safely retrieve historical data & day-wise statistics with full fallback protection
+ * Query Params: ?limit=50&days=7
+ */
+export const getWeatherHistory = async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
+    const days = parseInt(req.query.days, 10) || 0;
+
+    let records = [];
+
+    // 1. Try fetching from MongoDB if connected
+    if (mongoose.connection.readyState === 1) {
+      try {
+        const query = {};
+        if (days > 0) {
+          const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+          query.receivedAt = { $gte: startDate };
+        }
+        records = await Weather.find(query).sort({ receivedAt: -1 }).limit(limit);
+      } catch (dbErr) {
+        console.error('[DB History Query Warning]', dbErr.message);
+      }
+    }
+
+    // 2. Fallback to in-memory history if DB returned no records or DB is offline
+    if ((!records || records.length === 0) && inMemoryHistory.length > 0) {
+      records = [...inMemoryHistory];
+      if (days > 0) {
+        const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        records = records.filter(item => new Date(item.receivedAt) >= startDate);
+      }
+      records = records.slice(0, limit);
+    }
+
+    // 3. Calculate Day-Wise / Periodic Statistics
+    let summary = {
+      totalReadings: records.length,
+      minTemp: null,
+      maxTemp: null,
+      avgTemp: null,
+      minHumidity: null,
+      maxHumidity: null,
+      avgHumidity: null
+    };
+
+    if (records.length > 0) {
+      const temps = records.map(r => r.temperature).filter(t => t !== undefined && !isNaN(t));
+      const hums = records.map(r => r.humidity).filter(h => h !== undefined && !isNaN(h));
+
+      if (temps.length > 0) {
+        summary.minTemp = Math.min(...temps);
+        summary.maxTemp = Math.max(...temps);
+        summary.avgTemp = Number((temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1));
+      }
+
+      if (hums.length > 0) {
+        summary.minHumidity = Math.min(...hums);
+        summary.maxHumidity = Math.max(...hums);
+        summary.avgHumidity = Number((hums.reduce((a, b) => a + b, 0) / hums.length).toFixed(1));
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      count: records.length,
+      summary,
+      data: records
+    });
+  } catch (error) {
+    // Fail-safe short-circuit for history
+    return res.status(200).json({
+      success: true,
+      count: inMemoryHistory.length,
+      summary: { totalReadings: inMemoryHistory.length },
+      data: inMemoryHistory.slice(0, 50)
     });
   }
 };

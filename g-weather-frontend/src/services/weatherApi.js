@@ -36,3 +36,24 @@ export const getLatestWeather = async () => {
     throw error;
   }
 };
+
+/**
+ * Fetch historical weather telemetry & daily summary
+ * GET /api/weather/history?limit=50&days=7
+ */
+export const getWeatherHistory = async (limit = 50, days = 0) => {
+  try {
+    const url = new URL(`${API_BASE_URL}/weather/history`);
+    if (limit) url.searchParams.append('limit', limit);
+    if (days) url.searchParams.append('days', days);
+
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+      return { success: true, data: [], summary: {} };
+    }
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    return { success: true, data: [], summary: {} };
+  }
+};

@@ -3,10 +3,16 @@ import Header from './components/Header';
 import WeatherCard from './components/WeatherCard';
 import RainCard from './components/RainCard';
 import TrendCard from './components/TrendCard';
-import { getHealth, getLatestWeather } from './services/weatherApi';
+import HistoryCard from './components/HistoryCard';
+import { getHealth, getLatestWeather, getWeatherHistory } from './services/weatherApi';
 
 export default function App() {
   const [weatherData, setWeatherData] = useState(null);
+  const [historyData, setHistoryData] = useState([]);
+  const [historySummary, setHistorySummary] = useState(null);
+  const [selectedFilter, setSelectedFilter] = useState('all');
+  const [filterDays, setFilterDays] = useState(0);
+
   const [isOnline, setIsOnline] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -32,7 +38,7 @@ export default function App() {
   };
 
   // Main polling function
-  const fetchTelemetry = async () => {
+  const fetchTelemetry = async (days = filterDays) => {
     // 1. Check Backend Health
     const healthy = await getHealth();
     setIsOnline(healthy);
@@ -58,23 +64,37 @@ export default function App() {
     } catch (err) {
       console.error('Telemetry Fetch Error:', err);
       setError('Unable to connect to G-WEATHER API');
+    }
+
+    // 3. Fetch History Telemetry & Daily Stats
+    try {
+      const histResult = await getWeatherHistory(50, days);
+      if (histResult.success) {
+        setHistoryData(histResult.data || []);
+        setHistorySummary(histResult.summary || null);
+      }
+    } catch (histErr) {
+      console.error('History Fetch Error:', histErr);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    // Initial fetch on mount
-    fetchTelemetry();
+  const handleFilterChange = (filterName, days) => {
+    setSelectedFilter(filterName);
+    setFilterDays(days);
+    fetchTelemetry(days);
+  };
 
-    // 10-Second Automatic Refresh Polling Interval
+  useEffect(() => {
+    fetchTelemetry(filterDays);
+
     const intervalId = setInterval(() => {
-      fetchTelemetry();
+      fetchTelemetry(filterDays);
     }, 10000);
 
-    // Clean up timer on unmount to prevent memory leaks
     return () => clearInterval(intervalId);
-  }, []);
+  }, [filterDays]);
 
   return (
     <div className="app-container">
@@ -91,7 +111,7 @@ export default function App() {
             <div className="error-icon">⚠️</div>
             <h2 className="error-title">{error}</h2>
             <p className="state-message">Please check if the Express backend is running on port 17205.</p>
-            <button className="retry-btn" onClick={fetchTelemetry}>Retry Connection</button>
+            <button className="retry-btn" onClick={() => fetchTelemetry(filterDays)}>Retry Connection</button>
           </div>
         ) : !weatherData ? (
           <div className="state-container empty-state">
@@ -148,6 +168,14 @@ export default function App() {
               pressureTrend={weatherData.pressureTrend}
               temperatureTrend={weatherData.temperatureTrend}
               humidityTrend={weatherData.humidityTrend}
+            />
+
+            {/* Periodic Data & Daily History Table */}
+            <HistoryCard
+              historyData={historyData}
+              summary={historySummary}
+              selectedFilter={selectedFilter}
+              onFilterChange={handleFilterChange}
             />
 
             {/* Footer / Last Updated */}
