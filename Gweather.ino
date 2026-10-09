@@ -52,7 +52,7 @@ const char* WIFI_PASSWORD = "123456789"; // Mobile hotspot password placeholder
 // ============================================================================
 // STAGE 6: TELEMETRY SERVER CONFIGURATION
 // ============================================================================
-const char* SERVER_URL = "http://10.41.101.232:17205/api/weather";
+const char* SERVER_URL = "http://gweather-six.vercel.app/api/weather";
 const char* DEVICE_ID  = "GWEATHER-001";
 
 // ============================================================================
@@ -943,8 +943,9 @@ void handleTelemetryUpload() {
   WiFiClient client;
   HTTPClient http;
 
-  // Set reasonable timeout (3 seconds) to prevent blocking main loop
-  http.setTimeout(3000);
+  // Set reasonable timeout (5 seconds) and enable redirect following for Vercel HTTPS
+  http.setTimeout(5000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW);
 
   if (!http.begin(client, SERVER_URL)) {
     Serial.println("[Telemetry] HTTP connection failed - Invalid URL format");
@@ -953,7 +954,7 @@ void handleTelemetryUpload() {
 
   http.addHeader("Content-Type", "application/json");
 
-  // Construct JSON payload using actual V3.2 sensor & RTC values
+  // Construct JSON payload using actual V3.2 sensor, RTC, and power values
   String jsonPayload = "{";
   jsonPayload += "\"deviceId\":\"" + String(DEVICE_ID) + "\",";
   jsonPayload += "\"temperature\":" + String(weather.temperature, 2) + ",";
@@ -965,6 +966,11 @@ void handleTelemetryUpload() {
   jsonPayload += "\"pressureTrend\":\"" + weather.pressTrend + "\",";
   jsonPayload += "\"temperatureTrend\":\"" + weather.tempTrend + "\",";
   jsonPayload += "\"humidityTrend\":\"" + weather.humTrend + "\",";
+  jsonPayload += "\"batteryVoltage\":" + String(weather.batteryVoltage, 2) + ",";
+  jsonPayload += "\"isUsbPower\":" + String(weather.isUsbPower ? "true" : "false") + ",";
+  jsonPayload += "\"estimatedPowerW\":" + String(weather.estimatedPowerW, 2) + ",";
+  jsonPayload += "\"estimatedEnergyWh\":" + String(weather.estimatedEnergyWh, 2) + ",";
+  jsonPayload += "\"uptimeHours\":" + String(millis() / 3600000.0, 2) + ",";
   jsonPayload += "\"timestamp\":\"" + getFormattedISO8601Timestamp() + "\"";
   jsonPayload += "}";
 
