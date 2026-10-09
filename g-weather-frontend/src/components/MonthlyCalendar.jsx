@@ -20,7 +20,7 @@ export default function MonthlyCalendar() {
     setLoading(true);
     try {
       const res = await getMonthlyCalendar(year, month);
-      if (res.success) {
+      if (res && res.success) {
         setCalendarData(res);
       }
     } catch (err) {
@@ -52,7 +52,6 @@ export default function MonthlyCalendar() {
     }
   };
 
-  // Compute blank start cells for calendar grid alignment
   const getFirstDayOfWeek = (year, month) => {
     return new Date(year, month - 1, 1).getDay();
   };
@@ -74,72 +73,80 @@ export default function MonthlyCalendar() {
 
   const getRainStatusClass = (status) => {
     switch (status) {
-      case 'RAINING': return 'status-raining';
-      case 'LIKELY': return 'status-likely';
-      case 'POSSIBLE': return 'status-possible';
-      case 'WATCH': return 'status-watch';
-      case 'DRY': return 'status-dry';
-      default: return 'status-nodata';
+      case 'RAINING': return 'status-badge-raining';
+      case 'LIKELY': return 'status-badge-likely';
+      case 'POSSIBLE': return 'status-badge-possible';
+      case 'WATCH': return 'status-badge-watch';
+      case 'DRY': return 'status-badge-dry';
+      default: return 'status-badge-nodata';
     }
   };
 
   return (
     <div className="card calendar-card">
-      <div className="card-header calendar-header">
+      {/* Header Controls */}
+      <div className="calendar-card-header">
         <div className="calendar-title-group">
-          <span className="card-icon">📅</span>
-          <h2 className="card-title">G-WEATHER Monthly Calendar</h2>
+          <span className="calendar-icon">📅</span>
+          <div>
+            <h2 className="calendar-main-title">Weather Calendar</h2>
+            <span className="calendar-sub-title">Monthly Climate & Rain Summary</span>
+          </div>
         </div>
-        
-        <div className="calendar-controls">
+
+        <div className="calendar-nav-controls">
           <button className="cal-nav-btn" onClick={handlePrevMonth} title="Previous Month">◀</button>
-          <span className="cal-current-label">{MONTH_NAMES[selectedMonth - 1]} {selectedYear}</span>
+          <span className="cal-month-display">{MONTH_NAMES[selectedMonth - 1]} {selectedYear}</span>
           <button className="cal-nav-btn" onClick={handleNextMonth} title="Next Month">▶</button>
         </div>
       </div>
 
-      {/* Monthly Summary Aggregates */}
+      {/* Summary KPI Pills */}
       {summary && (
-        <div className="calendar-summary-bar">
-          <div className="cal-stat-item">
-            <span className="cal-stat-label">Rainy / Likely Days</span>
-            <span className="cal-stat-value rain-text">🌧️ {summary.monthlyRainyDays} Days</span>
+        <div className="calendar-kpi-bar">
+          <div className="kpi-pill">
+            <span className="kpi-label">Rainy Days</span>
+            <span className="kpi-value text-cyan">🌧️ {summary.monthlyRainyDays} Days</span>
           </div>
-          <div className="cal-stat-item">
-            <span className="cal-stat-label">Avg Temp</span>
-            <span className="cal-stat-value">{summary.avgMonthlyTemp !== null ? `${summary.avgMonthlyTemp}°C` : '--'}</span>
+          <div className="kpi-pill">
+            <span className="kpi-label">Avg Temp</span>
+            <span className="kpi-value text-amber">{summary.avgMonthlyTemp !== null ? `${summary.avgMonthlyTemp}°C` : '--'}</span>
           </div>
-          <div className="cal-stat-item">
-            <span className="cal-stat-label">Temp Range</span>
-            <span className="cal-stat-value">{summary.lowestTemp !== null ? `${summary.lowestTemp}°C - ${summary.highestTemp}°C` : '--'}</span>
+          <div className="kpi-pill">
+            <span className="kpi-label">Temp Range</span>
+            <span className="kpi-value">{summary.lowestTemp !== null ? `${summary.lowestTemp}° - ${summary.highestTemp}°C` : '--'}</span>
           </div>
-          <div className="cal-stat-item">
-            <span className="cal-stat-label">Avg Humidity</span>
-            <span className="cal-stat-value">{summary.avgMonthlyHumidity !== null ? `${summary.avgMonthlyHumidity}%` : '--'}</span>
+          <div className="kpi-pill">
+            <span className="kpi-label">Avg Humidity</span>
+            <span className="kpi-value text-emerald">{summary.avgMonthlyHumidity !== null ? `${summary.avgMonthlyHumidity}%` : '--'}</span>
           </div>
         </div>
       )}
 
-      <div className="calendar-body">
+      {/* Grid Container */}
+      <div className="calendar-grid-container">
         {loading ? (
-          <div className="calendar-loading">Loading monthly weather records...</div>
+          <div className="calendar-loading-state">
+            <div className="spinner"></div>
+            <span>Loading monthly weather records...</span>
+          </div>
         ) : (
-          <div className="calendar-grid-wrapper">
-            {/* Weekday headers */}
-            <div className="calendar-weekdays-row">
-              {WEEKDAY_NAMES.map(day => (
-                <div key={day} className="calendar-weekday-header">{day}</div>
+          <div className="calendar-matrix">
+            {/* Weekday Labels */}
+            <div className="weekday-header-row">
+              {WEEKDAY_NAMES.map((day) => (
+                <div key={day} className="weekday-cell">{day}</div>
               ))}
             </div>
 
-            {/* Grid of days */}
-            <div className="calendar-days-grid">
-              {/* Blank leading cells */}
+            {/* Matrix Days */}
+            <div className="month-days-grid">
+              {/* Empty offset cells */}
               {Array.from({ length: firstDayOffset }).map((_, i) => (
-                <div key={`blank-${i}`} className="calendar-day-cell cell-empty"></div>
+                <div key={`blank-${i}`} className="day-card day-card-empty"></div>
               ))}
 
-              {/* Day cells */}
+              {/* Real Days */}
               {daysList.map((dayObj) => {
                 const isToday =
                   selectedYear === currentDate.getFullYear() &&
@@ -149,30 +156,31 @@ export default function MonthlyCalendar() {
                 return (
                   <div
                     key={`day-${dayObj.day}`}
-                    className={`calendar-day-cell ${dayObj.hasData ? 'cell-active' : 'cell-nodata'} ${isToday ? 'cell-today' : ''}`}
+                    className={`day-card ${dayObj.hasData ? 'day-card-active' : 'day-card-nodata'} ${isToday ? 'day-card-today' : ''}`}
                     onClick={() => dayObj.hasData && setSelectedDayDetail(dayObj)}
                   >
-                    <div className="day-cell-header">
-                      <span className="day-number">{dayObj.day}</span>
+                    <div className="day-top-bar">
+                      <span className="day-num">{dayObj.day}</span>
                       {dayObj.hasData && (
-                        <span className={`day-status-pill ${getRainStatusClass(dayObj.rainStatus)}`}>
+                        <span className={`day-status-icon ${getRainStatusClass(dayObj.rainStatus)}`}>
                           {getRainStatusIcon(dayObj.rainStatus)}
                         </span>
                       )}
                     </div>
 
                     {dayObj.hasData ? (
-                      <div className="day-cell-content">
-                        <div className="day-temp-range">
-                          <span className="temp-high">{dayObj.maxTemp}°</span>
-                          <span className="temp-low">{dayObj.minTemp}°</span>
+                      <div className="day-info-block">
+                        <div className="day-temps">
+                          <span className="high-t">{dayObj.maxTemp}°</span>
+                          <span className="temp-sep">/</span>
+                          <span className="low-t">{dayObj.minTemp}°</span>
                         </div>
                         <div className="day-rain-prob">
                           💧 {dayObj.maxRainProb}%
                         </div>
                       </div>
                     ) : (
-                      <div className="day-cell-no-record">No data</div>
+                      <div className="day-empty-text">--</div>
                     )}
                   </div>
                 );
@@ -182,40 +190,46 @@ export default function MonthlyCalendar() {
         )}
       </div>
 
-      {/* Selected Day Details Modal */}
+      {/* Selected Day Details Popup Modal */}
       {selectedDayDetail && (
-        <div className="day-modal-overlay" onClick={() => setSelectedDayDetail(null)}>
-          <div className="day-modal-content" onClick={e => e.stopPropagation()}>
-            <div className="day-modal-header">
-              <h3>📅 Daily Report: {selectedDayDetail.dateStr}</h3>
-              <button className="close-modal-btn" onClick={() => setSelectedDayDetail(null)}>✕</button>
+        <div className="day-modal-backdrop" onClick={() => setSelectedDayDetail(null)}>
+          <div className="day-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="day-modal-card-header">
+              <div className="modal-title-wrap">
+                <span className="modal-icon">📅</span>
+                <h3>Daily Weather Log: {selectedDayDetail.dateStr}</h3>
+              </div>
+              <button className="modal-close-btn" onClick={() => setSelectedDayDetail(null)}>✕</button>
             </div>
-            <div className="day-modal-body">
-              <div className="modal-metric-grid">
-                <div className="modal-metric-card">
-                  <span className="modal-metric-title">Rain Status</span>
-                  <span className="modal-metric-value">
-                    {getRainStatusIcon(selectedDayDetail.rainStatus)} {selectedDayDetail.rainStatus}
-                  </span>
-                </div>
-                <div className="modal-metric-card">
-                  <span className="modal-metric-title">Max Rain Probability</span>
-                  <span className="modal-metric-value">{selectedDayDetail.maxRainProb}%</span>
-                </div>
-                <div className="modal-metric-card">
-                  <span className="modal-metric-title">Temperature (Min / Max / Avg)</span>
-                  <span className="modal-metric-value">
-                    {selectedDayDetail.minTemp}°C / {selectedDayDetail.maxTemp}°C ({selectedDayDetail.avgTemp}°C avg)
-                  </span>
-                </div>
-                <div className="modal-metric-card">
-                  <span className="modal-metric-title">Average Humidity</span>
-                  <span className="modal-metric-value">{selectedDayDetail.avgHumidity}%</span>
-                </div>
-                <div className="modal-metric-card">
-                  <span className="modal-metric-title">Total Records Received</span>
-                  <span className="modal-metric-value">{selectedDayDetail.readingsCount} packets</span>
-                </div>
+
+            <div className="day-modal-grid">
+              <div className="modal-info-box">
+                <span className="box-lbl">Rain Status</span>
+                <span className="box-val">
+                  {getRainStatusIcon(selectedDayDetail.rainStatus)} {selectedDayDetail.rainStatus}
+                </span>
+              </div>
+
+              <div className="modal-info-box">
+                <span className="box-lbl">Max Rain Chance</span>
+                <span className="box-val text-cyan">{selectedDayDetail.maxRainProb}%</span>
+              </div>
+
+              <div className="modal-info-box">
+                <span className="box-lbl">Temperature Range</span>
+                <span className="box-val text-amber">
+                  {selectedDayDetail.minTemp}°C to {selectedDayDetail.maxTemp}°C
+                </span>
+              </div>
+
+              <div className="modal-info-box">
+                <span className="box-lbl">Average Humidity</span>
+                <span className="box-val text-emerald">{selectedDayDetail.avgHumidity}%</span>
+              </div>
+
+              <div className="modal-info-box span-2">
+                <span className="box-lbl">Telemetry Readings Ingested</span>
+                <span className="box-val">{selectedDayDetail.readingsCount} packets logged</span>
               </div>
             </div>
           </div>
