@@ -704,7 +704,16 @@ void update24HourStats() {
 void logToSDCard() {
   if (!sdAvailable) return;
 
+  // Deselect TFT CS pin to ensure clean SPI bus state for MicroSD Card
+  digitalWrite(TFT_CS, HIGH);
+  digitalWrite(SD_CS, LOW);
+
   File logFile = SD.open("/weather_log.csv", FILE_APPEND);
+
+  if (!logFile) {
+    // Fallback retry mode
+    logFile = SD.open("/weather_log.csv", "a");
+  }
 
   if (logFile) {
     logFile.print(getFormattedDateDDMONYYYY());
@@ -766,12 +775,19 @@ void logToSDCard() {
   } else {
     Serial.println("[SD Log Error] Failed to open /weather_log.csv for writing.");
   }
+
+  // Release SD CS pin after transaction
+  digitalWrite(SD_CS, HIGH);
 }
 
 // ============================================================================
 // EXACT V3.2 TFT RENDERING ENGINE (8 PAGES, DEEP NAVY BG, ZERO FLICKER)
 // ============================================================================
 void updateTFTDisplay() {
+  // Deselect SD CS pin to isolate SPI bus for TFT Display
+  digitalWrite(SD_CS, HIGH);
+  digitalWrite(TFT_CS, LOW);
+
   if (pageNeedsFullRedraw) {
     tft.fillScreen(COLOR_NAVY);
     drawTFTPage(currentTftPage, true);
@@ -780,6 +796,8 @@ void updateTFTDisplay() {
     // Dirty-region dynamic refresh without full screen clear
     drawTFTPage(currentTftPage, false);
   }
+
+  digitalWrite(TFT_CS, HIGH);
 }
 
 void drawTFTPage(uint8_t page, bool fullRedraw) {
