@@ -22,11 +22,14 @@ export default function HistoryCard({ historyData, summary, selectedFilter, onFi
   };
 
   return (
-    <div className="weather-card history-card">
+    <div className="weather-card glass-card history-card">
       <div className="history-header">
-        <div className="history-title-group">
-          <h3 className="card-title">Periodic Data & Daily History</h3>
-          <span className="card-subtitle">Safe Periodic Telemetry & Aggregations</span>
+        <div className="card-header-left">
+          <span className="card-metric-icon">📑</span>
+          <div>
+            <h3 className="card-title">Periodic Telemetry Logs & History</h3>
+            <span className="card-subtitle">Real-Time Sensor Record Stream</span>
+          </div>
         </div>
         <div className="filter-buttons">
           <button
@@ -54,7 +57,7 @@ export default function HistoryCard({ historyData, summary, selectedFilter, onFi
       {summary && summary.totalReadings > 0 && (
         <div className="summary-banner">
           <div className="summary-stat">
-            <span className="summary-label">Readings</span>
+            <span className="summary-label">Total Readings</span>
             <span className="summary-val">{summary.totalReadings}</span>
           </div>
           <div className="summary-stat">
@@ -94,10 +97,10 @@ export default function HistoryCard({ historyData, summary, selectedFilter, onFi
               </tr>
             ) : (
               historyData.map((row, idx) => (
-                <tr key={idx}>
+                <tr key={idx} className="table-row-hover">
                   <td className="time-col">{formatTime(row.receivedAt || row.timestamp)}</td>
-                  <td>{formatDate(row.receivedAt || row.timestamp)}</td>
-                  <td className="bold">{row.temperature}°C</td>
+                  <td className="date-col">{formatDate(row.receivedAt || row.timestamp)}</td>
+                  <td className="bold temp-val">{row.temperature}°C</td>
                   <td>{row.humidity}%</td>
                   <td>{row.pressure} hPa</td>
                   <td>{row.light} lx</td>
