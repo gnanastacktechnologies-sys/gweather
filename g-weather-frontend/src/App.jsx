@@ -3,6 +3,9 @@ import Header from './components/Header';
 import WeatherCard from './components/WeatherCard';
 import RainCard from './components/RainCard';
 import TrendCard from './components/TrendCard';
+import PowerCard from './components/PowerCard';
+import MonthlyCalendar from './components/MonthlyCalendar';
+import RecentActivities from './components/RecentActivities';
 import HistoryCard from './components/HistoryCard';
 import { getHealth, getLatestWeather, getWeatherHistory } from './services/weatherApi';
 
@@ -113,12 +116,6 @@ export default function App() {
             <p className="state-message">Please check if the Express backend is running on port 17205.</p>
             <button className="retry-btn" onClick={() => fetchTelemetry(filterDays)}>Retry Connection</button>
           </div>
-        ) : !weatherData ? (
-          <div className="state-container empty-state">
-            <div className="empty-icon">📡</div>
-            <h2 className="empty-title">No weather data available</h2>
-            <p className="state-message">The G-WEATHER backend is online, but no telemetry records exist yet.</p>
-          </div>
         ) : (
           <div className="dashboard-grid">
             {/* Primary Hero Card: Temperature */}
@@ -128,7 +125,7 @@ export default function App() {
                 <span className="hero-badge">DHT22</span>
               </div>
               <div className="hero-body">
-                <span className="hero-value">{weatherData.temperature !== undefined ? weatherData.temperature : '--'}</span>
+                <span className="hero-value">{weatherData?.temperature !== undefined ? weatherData.temperature : '--'}</span>
                 <span className="hero-unit">°C</span>
               </div>
             </div>
@@ -137,21 +134,21 @@ export default function App() {
             <div className="metrics-grid">
               <WeatherCard
                 title="Humidity"
-                value={weatherData.humidity}
+                value={weatherData?.humidity}
                 unit="%"
                 subtitle="Relative Humidity"
               />
 
               <WeatherCard
                 title="Pressure"
-                value={weatherData.pressure}
+                value={weatherData?.pressure}
                 unit="hPa"
                 subtitle="Barometric Pressure"
               />
 
               <WeatherCard
                 title="Light"
-                value={weatherData.light}
+                value={weatherData?.light}
                 unit="lx"
                 subtitle="BH1750 Ambient Light"
               />
@@ -159,18 +156,33 @@ export default function App() {
 
             {/* Rain Probability & Status Card */}
             <RainCard
-              rainProbability={weatherData.rainProbability}
-              rainStatus={weatherData.rainStatus}
+              rainProbability={weatherData?.rainProbability || 0}
+              rainStatus={weatherData?.rainStatus || 'DRY'}
+            />
+
+            {/* Power & Hardware Efficiency Card */}
+            <PowerCard
+              batteryVoltage={weatherData?.batteryVoltage}
+              isUsbPower={weatherData?.isUsbPower}
+              estimatedPowerW={weatherData?.estimatedPowerW}
+              estimatedEnergyWh={weatherData?.estimatedEnergyWh}
+              uptimeHours={weatherData?.uptimeHours}
             />
 
             {/* Trends Card */}
             <TrendCard
-              pressureTrend={weatherData.pressureTrend}
-              temperatureTrend={weatherData.temperatureTrend}
-              humidityTrend={weatherData.humidityTrend}
+              pressureTrend={weatherData?.pressureTrend || 'STEADY'}
+              temperatureTrend={weatherData?.temperatureTrend || 'STEADY'}
+              humidityTrend={weatherData?.humidityTrend || 'STEADY'}
             />
 
-            {/* Periodic Data & Daily History Table */}
+            {/* G-WEATHER Monthly Calendar View */}
+            <MonthlyCalendar />
+
+            {/* Split Recent Activities (1. Hardware Connection & Uptime, 2. Weather Report Telemetry) */}
+            <RecentActivities />
+
+            {/* Periodic Telemetry & Daily History Table */}
             <HistoryCard
               historyData={historyData}
               summary={historySummary}

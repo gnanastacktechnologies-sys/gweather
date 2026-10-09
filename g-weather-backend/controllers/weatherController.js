@@ -1,15 +1,37 @@
 import Weather from '../models/Weather.js';
 import mongoose from 'mongoose';
 
-// In-memory fallback telemetry cache (ensures zero 500 errors if DB is offline/unconfigured)
+// In-memory fallback telemetry cache
 let inMemoryLatest = null;
-
-// In-memory history buffer (keeps up to 200 recent packets safely)
 let inMemoryHistory = [];
+
+// In-memory Station Activity Log & Session State
+let stationState = {
+  firstSeenAt: new Date(),
+  lastSeenAt: null,
+  currentSessionStart: null,
+  activityLogs: [],
+  sessionHistory: []
+};
+
+// Log activity event
+const addActivityLog = (type, title, description, details = {}) => {
+  const logEntry = {
+    id: 'act-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+    type, // 'connection' | 'telemetry' | 'system'
+    title,
+    description,
+    timestamp: new Date().toISOString(),
+    details
+  };
+  stationState.activityLogs.unshift(logEntry);
+  if (stationState.activityLogs.length > 100) {
+    stationState.activityLogs = stationState.activityLogs.slice(0, 100);
+  }
+};
 
 /**
  * GET /api/health
- * Health check endpoint to verify backend status
  */
 export const getHealth = (req, res) => {
   return res.status(200).json({
@@ -20,7 +42,7 @@ export const getHealth = (req, res) => {
 
 /**
  * POST /api/weather
- * Receive JSON weather telemetry from ESP32 or client test tools
+ * Ingest JSON telemetry from ESP32 or test client
  */
 export const postWeatherData = async (req, res, next) => {
   try {
@@ -35,10 +57,15 @@ export const postWeatherData = async (req, res, next) => {
       pressureTrend,
       temperatureTrend,
       humidityTrend,
-      timestamp
+      timestamp,
+      batteryVoltage,
+      isUsbPower,
+      estimatedPowerW,
+      estimatedEnergyWh,
+      uptimeHours
     } = req.body;
 
-    // Field validation: temperature, humidity, and pressure must be provided and numeric
+    // Field validation: temperature, humidity, and pressure required
     if (temperature === undefined || isNaN(Number(temperature))) {
       return res.status(400).json({
         success: false,
@@ -69,6 +96,31 @@ export const postWeatherData = async (req, res, next) => {
       }
     }
 
+    const now = new Date();
+    
+    // Station Connection & Session Tracking
+    const OFFLINE_THRESHOLD_MS = 6 * 60 * 1000; // 6 minutes
+    const wasOffline = !stationState.lastSeenAt || (now - new Date(stationState.lastSeenAt)) > OFFLINE_THRESHOLD_MS;
+    
+    if (wasOffline) {
+      stationState.currentSessionStart = now;
+      addActivityLog(
+        'connection',
+        'Weather Station Came Online',
+        `Device ${deviceId || 'GWEATHER-001'} connected to server API`,
+        { deviceId: deviceId || 'GWEATHER-001' }
+      );
+    } else {
+      addActivityLog(
+        'telemetry',
+        'Telemetry Received',
+        `Temp: ${temperature}°C, Hum: ${humidity}%, Rain: ${rainStatus || 'DRY'} (${rainProbability || 0}%)`,
+        { temperature, humidity, pressure, rainStatus }
+      );
+    }
+
+    stationState.lastSeenAt = now;
+
     const payload = {
       deviceId: deviceId || "GWEATHER-001",
       temperature: Number(temperature),
@@ -80,15 +132,20 @@ export const postWeatherData = async (req, res, next) => {
       pressureTrend: pressureTrend || "STEADY",
       temperatureTrend: temperatureTrend || "STEADY",
       humidityTrend: humidityTrend || "STEADY",
+      batteryVoltage: batteryVoltage !== undefined ? Number(batteryVoltage) : 0,
+      isUsbPower: isUsbPower !== undefined ? Boolean(isUsbPower) : true,
+      estimatedPowerW: estimatedPowerW !== undefined ? Number(estimatedPowerW) : 0,
+      estimatedEnergyWh: estimatedEnergyWh !== undefined ? Number(estimatedEnergyWh) : 0,
+      uptimeHours: uptimeHours !== undefined ? Number(uptimeHours) : 0,
       timestamp: parsedTimestamp,
-      receivedAt: new Date()
+      receivedAt: now
     };
 
-    // Store in in-memory cache & history buffer immediately
+    // Store in memory
     inMemoryLatest = payload;
     inMemoryHistory.unshift(payload);
-    if (inMemoryHistory.length > 200) {
-      inMemoryHistory = inMemoryHistory.slice(0, 200);
+    if (inMemoryHistory.length > 500) {
+      inMemoryHistory = inMemoryHistory.slice(0, 500);
     }
 
     // Persist to MongoDB if connected
@@ -113,11 +170,10 @@ export const postWeatherData = async (req, res, next) => {
 
 /**
  * GET /api/weather
- * Safely retrieve latest weather data — short-circuits gracefully to prevent 500 errors
+ * Get latest weather packet
  */
 export const getLatestWeather = async (req, res) => {
   try {
-    // 1. If MongoDB is connected, try reading from DB
     if (mongoose.connection.readyState === 1) {
       try {
         const dbRecord = await Weather.findOne().sort({ receivedAt: -1 });
@@ -133,7 +189,6 @@ export const getLatestWeather = async (req, res) => {
       }
     }
 
-    // 2. Fallback to in-memory cache if available
     if (inMemoryLatest) {
       return res.status(200).json({
         success: true,
@@ -142,7 +197,6 @@ export const getLatestWeather = async (req, res) => {
       });
     }
 
-    // 3. Clean short-circuit (200 OK with null data, zero 500 errors)
     return res.status(200).json({
       success: true,
       message: "No weather data recorded yet",
@@ -159,8 +213,6 @@ export const getLatestWeather = async (req, res) => {
 
 /**
  * GET /api/weather/history
- * Safely retrieve historical data & day-wise statistics with full fallback protection
- * Query Params: ?limit=50&days=7
  */
 export const getWeatherHistory = async (req, res) => {
   try {
@@ -169,7 +221,6 @@ export const getWeatherHistory = async (req, res) => {
 
     let records = [];
 
-    // 1. Try fetching from MongoDB if connected
     if (mongoose.connection.readyState === 1) {
       try {
         const query = {};
@@ -183,7 +234,6 @@ export const getWeatherHistory = async (req, res) => {
       }
     }
 
-    // 2. Fallback to in-memory history if DB returned no records or DB is offline
     if ((!records || records.length === 0) && inMemoryHistory.length > 0) {
       records = [...inMemoryHistory];
       if (days > 0) {
@@ -193,7 +243,6 @@ export const getWeatherHistory = async (req, res) => {
       records = records.slice(0, limit);
     }
 
-    // 3. Calculate Day-Wise / Periodic Statistics
     let summary = {
       totalReadings: records.length,
       minTemp: null,
@@ -228,12 +277,217 @@ export const getWeatherHistory = async (req, res) => {
       data: records
     });
   } catch (error) {
-    // Fail-safe short-circuit for history
     return res.status(200).json({
       success: true,
       count: inMemoryHistory.length,
       summary: { totalReadings: inMemoryHistory.length },
       data: inMemoryHistory.slice(0, 50)
+    });
+  }
+};
+
+/**
+ * GET /api/weather/station-activity
+ * Returns Split Recent Activities:
+ * 1. Station connection & hardware status (Online/Offline, Uptime hours, Session history)
+ * 2. Weather telemetry update activity log stream
+ */
+export const getStationActivity = async (req, res) => {
+  try {
+    const now = new Date();
+    const OFFLINE_THRESHOLD_MS = 6 * 60 * 1000; // 6 mins
+
+    let lastSeen = stationState.lastSeenAt;
+    
+    // Check latest record timestamp if stationState.lastSeenAt is null
+    if (!lastSeen && inMemoryLatest) {
+      lastSeen = new Date(inMemoryLatest.receivedAt || inMemoryLatest.timestamp);
+    }
+
+    let isStationOnline = false;
+    let currentSessionHours = 0;
+
+    if (lastSeen) {
+      const diffMs = now - new Date(lastSeen);
+      isStationOnline = diffMs <= OFFLINE_THRESHOLD_MS;
+      
+      const sessionStart = stationState.currentSessionStart || stationState.firstSeenAt || lastSeen;
+      currentSessionHours = Number(((now - new Date(sessionStart)) / (1000 * 60 * 60)).toFixed(2));
+    }
+
+    // Split activity into 2 categories:
+    // Category 1: Connection & Hardware Uptime events
+    // Category 2: Weather Report / Telemetry sync events
+    const connectionLogs = stationState.activityLogs.filter(log => log.type === 'connection' || log.type === 'system');
+    const weatherLogs = stationState.activityLogs.filter(log => log.type === 'telemetry');
+
+    return res.status(200).json({
+      success: true,
+      station: {
+        deviceId: inMemoryLatest?.deviceId || "GWEATHER-001",
+        status: isStationOnline ? "ONLINE" : "OFFLINE",
+        lastSeenAt: lastSeen ? new Date(lastSeen).toISOString() : null,
+        currentSessionStart: stationState.currentSessionStart ? new Date(stationState.currentSessionStart).toISOString() : null,
+        uptimeHours: currentSessionHours,
+        batteryVoltage: inMemoryLatest?.batteryVoltage || 0,
+        isUsbPower: inMemoryLatest?.isUsbPower ?? true,
+        estimatedPowerW: inMemoryLatest?.estimatedPowerW || 0,
+        estimatedEnergyWh: inMemoryLatest?.estimatedEnergyWh || 0,
+        firmwareVersion: "V3.2 + Stage 6 Telemetry"
+      },
+      activities: {
+        connectionHistory: connectionLogs.length > 0 ? connectionLogs : [
+          {
+            id: 'act-init-1',
+            type: 'connection',
+            title: isStationOnline ? 'Weather Station Online' : 'Weather Station Offline',
+            description: isStationOnline 
+              ? 'Station is active and sending telemetry heartbeats every 5 minutes' 
+              : 'Station has not sent telemetry in the last 6 minutes',
+            timestamp: lastSeen ? new Date(lastSeen).toISOString() : new Date().toISOString()
+          }
+        ],
+        weatherReportLogs: weatherLogs.length > 0 ? weatherLogs : (
+          inMemoryHistory.slice(0, 15).map((pkt, idx) => ({
+            id: 'pkt-' + idx,
+            type: 'telemetry',
+            title: `Weather Telemetry #${idx + 1}`,
+            description: `Temp: ${pkt.temperature}°C | Hum: ${pkt.humidity}% | Rain: ${pkt.rainStatus} (${pkt.rainProbability}%)`,
+            timestamp: pkt.receivedAt || pkt.timestamp
+          }))
+        )
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+/**
+ * GET /api/weather/calendar
+ * Returns daily aggregate stats for G-Weather monthly calendar (temp min/max/avg, rain days)
+ * Query Params: ?year=2026&month=10 (month 1-12)
+ */
+export const getMonthlyCalendar = async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    const month = parseInt(req.query.month, 10) || (new Date().getMonth() + 1);
+
+    const startDate = new Date(year, month - 1, 1, 0, 0, 0);
+    const endDate = new Date(year, month, 0, 23, 59, 59);
+    const totalDaysInMonth = new Date(year, month, 0).getDate();
+
+    let allRecords = [];
+
+    if (mongoose.connection.readyState === 1) {
+      try {
+        allRecords = await Weather.find({
+          receivedAt: { $gte: startDate, $lte: endDate }
+        }).sort({ receivedAt: 1 });
+      } catch (dbErr) {
+        console.error('[DB Calendar Warning]', dbErr.message);
+      }
+    }
+
+    if ((!allRecords || allRecords.length === 0) && inMemoryHistory.length > 0) {
+      allRecords = inMemoryHistory.filter(r => {
+        const d = new Date(r.receivedAt || r.timestamp);
+        return d >= startDate && d <= endDate;
+      });
+    }
+
+    // Group records by day of month
+    const calendarDays = [];
+    let monthlyRainyDays = 0;
+    let allTemps = [];
+    let allHums = [];
+
+    for (let dayNum = 1; dayNum <= totalDaysInMonth; dayNum++) {
+      const dayDateStr = `${year}-${String(month).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+      
+      const dayRecords = allRecords.filter(r => {
+        const d = new Date(r.receivedAt || r.timestamp);
+        return d.getDate() === dayNum;
+      });
+
+      if (dayRecords.length > 0) {
+        const temps = dayRecords.map(r => r.temperature);
+        const hums = dayRecords.map(r => r.humidity);
+        const rainProbs = dayRecords.map(r => r.rainProbability);
+        
+        const minT = Math.min(...temps);
+        const maxT = Math.max(...temps);
+        const avgT = Number((temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1));
+        const avgH = Number((hums.reduce((a, b) => a + b, 0) / hums.length).toFixed(1));
+        const maxRainProb = Math.max(...rainProbs);
+
+        // Determine dominant rain status
+        const rainStatuses = dayRecords.map(r => r.rainStatus);
+        let dominantStatus = "DRY";
+        if (rainStatuses.includes("RAINING")) dominantStatus = "RAINING";
+        else if (rainStatuses.includes("LIKELY")) dominantStatus = "LIKELY";
+        else if (rainStatuses.includes("POSSIBLE")) dominantStatus = "POSSIBLE";
+        else if (rainStatuses.includes("WATCH")) dominantStatus = "WATCH";
+
+        if (dominantStatus === "RAINING" || dominantStatus === "LIKELY") {
+          monthlyRainyDays++;
+        }
+
+        allTemps.push(...temps);
+        allHums.push(...hums);
+
+        calendarDays.push({
+          day: dayNum,
+          dateStr: dayDateStr,
+          hasData: true,
+          readingsCount: dayRecords.length,
+          minTemp: minT,
+          maxTemp: maxT,
+          avgTemp: avgT,
+          avgHumidity: avgH,
+          maxRainProb,
+          rainStatus: dominantStatus
+        });
+      } else {
+        calendarDays.push({
+          day: dayNum,
+          dateStr: dayDateStr,
+          hasData: false,
+          readingsCount: 0,
+          minTemp: null,
+          maxTemp: null,
+          avgTemp: null,
+          avgHumidity: null,
+          maxRainProb: 0,
+          rainStatus: "NO_DATA"
+        });
+      }
+    }
+
+    const monthlySummary = {
+      year,
+      month,
+      totalDays: totalDaysInMonth,
+      recordedDays: calendarDays.filter(d => d.hasData).length,
+      monthlyRainyDays,
+      highestTemp: allTemps.length > 0 ? Math.max(...allTemps) : null,
+      lowestTemp: allTemps.length > 0 ? Math.min(...allTemps) : null,
+      avgMonthlyTemp: allTemps.length > 0 ? Number((allTemps.reduce((a, b) => a + b, 0) / allTemps.length).toFixed(1)) : null,
+      avgMonthlyHumidity: allHums.length > 0 ? Number((allHums.reduce((a, b) => a + b, 0) / allHums.length).toFixed(1)) : null
+    };
+
+    return res.status(200).json({
+      success: true,
+      summary: monthlySummary,
+      days: calendarDays
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };

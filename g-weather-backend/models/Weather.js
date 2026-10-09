@@ -55,6 +55,26 @@ const weatherSchema = new mongoose.Schema(
     receivedAt: {
       type: Date,
       default: Date.now
+    },
+    batteryVoltage: {
+      type: Number,
+      default: 0
+    },
+    isUsbPower: {
+      type: Boolean,
+      default: true
+    },
+    estimatedPowerW: {
+      type: Number,
+      default: 0
+    },
+    estimatedEnergyWh: {
+      type: Number,
+      default: 0
+    },
+    uptimeHours: {
+      type: Number,
+      default: 0
     }
   },
   {

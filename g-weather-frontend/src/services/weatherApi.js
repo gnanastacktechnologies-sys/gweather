@@ -57,3 +57,41 @@ export const getWeatherHistory = async (limit = 50, days = 0) => {
     return { success: true, data: [], summary: {} };
   }
 };
+
+/**
+ * Fetch split recent activities & station hardware status
+ * GET /api/weather/station-activity
+ */
+export const getStationActivity = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/weather/station-activity`);
+    if (!response.ok) {
+      return { success: false, station: null, activities: { connectionHistory: [], weatherReportLogs: [] } };
+    }
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    return { success: false, station: null, activities: { connectionHistory: [], weatherReportLogs: [] } };
+  }
+};
+
+/**
+ * Fetch G-Weather monthly calendar aggregated records
+ * GET /api/weather/calendar?year=2026&month=10
+ */
+export const getMonthlyCalendar = async (year, month) => {
+  try {
+    const url = new URL(`${API_BASE_URL}/weather/calendar`);
+    if (year) url.searchParams.append('year', year);
+    if (month) url.searchParams.append('month', month);
+
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+      return { success: false, summary: null, days: [] };
+    }
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    return { success: false, summary: null, days: [] };
+  }
+};
