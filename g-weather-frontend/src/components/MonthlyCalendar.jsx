@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getMonthlyCalendar } from '../services/weatherApi';
+import { CalendarIcon, SunIcon, RainIcon, CloudRainIcon } from './Icons';
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -16,8 +17,8 @@ export default function MonthlyCalendar() {
   const [loading, setLoading] = useState(true);
   const [selectedDayDetail, setSelectedDayDetail] = useState(null);
 
-  const fetchCalendar = async (year, month) => {
-    setLoading(true);
+  const fetchCalendar = async (year = selectedYear, month = selectedMonth, showLoading = true) => {
+    if (showLoading && !calendarData) setLoading(true);
     try {
       const res = await getMonthlyCalendar(year, month);
       if (res && res.success) {
@@ -31,7 +32,14 @@ export default function MonthlyCalendar() {
   };
 
   useEffect(() => {
-    fetchCalendar(selectedYear, selectedMonth);
+    fetchCalendar(selectedYear, selectedMonth, true);
+
+    // Auto-poll calendar updates every 15 seconds so live telemetry updates immediately
+    const interval = setInterval(() => {
+      fetchCalendar(selectedYear, selectedMonth, false);
+    }, 15000);
+
+    return () => clearInterval(interval);
   }, [selectedYear, selectedMonth]);
 
   const handlePrevMonth = () => {
@@ -60,14 +68,13 @@ export default function MonthlyCalendar() {
   const daysList = calendarData?.days || [];
   const summary = calendarData?.summary;
 
-  const getRainStatusIcon = (status) => {
+  const renderRainStatusIcon = (status) => {
     switch (status) {
-      case 'RAINING': return '🌧️';
-      case 'LIKELY': return '🌦️';
-      case 'POSSIBLE': return '⛅';
-      case 'WATCH': return '🌤️';
-      case 'DRY': return '☀️';
-      default: return '➖';
+      case 'RAINING': return <CloudRainIcon className="pill-svg icon-rose" />;
+      case 'LIKELY': return <CloudRainIcon className="pill-svg icon-cyan" />;
+      case 'POSSIBLE': return <RainIcon className="pill-svg icon-purple" />;
+      case 'WATCH': return <SunIcon className="pill-svg icon-amber" />;
+      default: return <SunIcon className="pill-svg icon-emerald" />;
     }
   };
 
@@ -77,8 +84,7 @@ export default function MonthlyCalendar() {
       case 'LIKELY': return 'status-badge-likely';
       case 'POSSIBLE': return 'status-badge-possible';
       case 'WATCH': return 'status-badge-watch';
-      case 'DRY': return 'status-badge-dry';
-      default: return 'status-badge-nodata';
+      default: return 'status-badge-dry';
     }
   };
 
@@ -87,9 +93,12 @@ export default function MonthlyCalendar() {
       {/* Header Controls */}
       <div className="calendar-card-header">
         <div className="calendar-title-group">
-          <span className="calendar-icon">📅</span>
+          <div className="icon-badge"><CalendarIcon className="card-svg icon-cyan" /></div>
           <div>
-            <h2 className="calendar-main-title">Weather Calendar</h2>
+            <div className="title-row-chip">
+              <h2 className="calendar-main-title">Weather Calendar</h2>
+              <span className="live-pulse-chip">LIVE UPDATES</span>
+            </div>
             <span className="calendar-sub-title">Monthly Climate & Rain Summary</span>
           </div>
         </div>
@@ -105,7 +114,7 @@ export default function MonthlyCalendar() {
       {summary && (
         <div className="calendar-kpi-bar">
           <div className="kpi-pill">
-            <span className="kpi-label">Rainy Days</span>
+            <span className="kpi-label">Rainy / Likely Days</span>
             <span className="kpi-value text-cyan">🌧️ {summary.monthlyRainyDays} Days</span>
           </div>
           <div className="kpi-pill">
@@ -126,7 +135,7 @@ export default function MonthlyCalendar() {
       {/* Grid Container */}
       <div className="calendar-grid-container">
         {loading ? (
-          <div className="calendar-loading-state">
+          <div className="state-container loading-state" style={{ padding: '30px' }}>
             <div className="spinner"></div>
             <span>Loading monthly weather records...</span>
           </div>
@@ -163,7 +172,7 @@ export default function MonthlyCalendar() {
                       <span className="day-num">{dayObj.day}</span>
                       {dayObj.hasData && (
                         <span className={`day-status-icon ${getRainStatusClass(dayObj.rainStatus)}`}>
-                          {getRainStatusIcon(dayObj.rainStatus)}
+                          {renderRainStatusIcon(dayObj.rainStatus)}
                         </span>
                       )}
                     </div>
@@ -196,7 +205,7 @@ export default function MonthlyCalendar() {
           <div className="day-modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="day-modal-card-header">
               <div className="modal-title-wrap">
-                <span className="modal-icon">📅</span>
+                <div className="icon-badge"><CalendarIcon className="card-svg icon-cyan" /></div>
                 <h3>Daily Weather Log: {selectedDayDetail.dateStr}</h3>
               </div>
               <button className="modal-close-btn" onClick={() => setSelectedDayDetail(null)}>✕</button>
@@ -204,9 +213,10 @@ export default function MonthlyCalendar() {
 
             <div className="day-modal-grid">
               <div className="modal-info-box">
-                <span className="box-lbl">Rain Status</span>
-                <span className="box-val">
-                  {getRainStatusIcon(selectedDayDetail.rainStatus)} {selectedDayDetail.rainStatus}
+                <span className="box-lbl">Rain Classification</span>
+                <span className="box-val flex-val">
+                  {renderRainStatusIcon(selectedDayDetail.rainStatus)}
+                  <span>{selectedDayDetail.rainStatus}</span>
                 </span>
               </div>
 
