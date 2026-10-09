@@ -36,6 +36,7 @@
  */
 
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <Wire.h>
 #include <SPI.h>
@@ -57,7 +58,7 @@ const char* WIFI_PASSWORD = "123456789";
 // ============================================================================
 // STAGE 6: TELEMETRY SERVER CONFIGURATION
 // ============================================================================
-const char* SERVER_URL = "http://gweather-six.vercel.app/api/weather";
+const char* SERVER_URL = "https://gweather-six.vercel.app/api/weather";
 const char* DEVICE_ID  = "GWEATHER-001";
 
 // ============================================================================
@@ -1218,12 +1219,12 @@ void handleTelemetryUpload() {
 
   Serial.println("[Telemetry] Sending telemetry payload to Express API...");
 
-  WiFiClient client;
+  WiFiClientSecure client;
+  client.setInsecure();
   HTTPClient http;
 
-  // Set reasonable timeout (5 seconds) and enable redirect following for Vercel HTTPS
-  http.setTimeout(5000);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  // Set reasonable timeout (8 seconds) for HTTPS handshake & upload
+  http.setTimeout(8000);
 
   if (!http.begin(client, SERVER_URL)) {
     Serial.println("[Telemetry] HTTP connection failed - Invalid URL format");
