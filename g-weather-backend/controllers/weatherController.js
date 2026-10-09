@@ -99,7 +99,7 @@ export const postWeatherData = async (req, res, next) => {
     const now = new Date();
     
     // Station Connection & Session Tracking
-    const OFFLINE_THRESHOLD_MS = 6 * 60 * 1000; // 6 minutes
+    const OFFLINE_THRESHOLD_MS = 12 * 60 * 1000; // 12 minutes
     const wasOffline = !stationState.lastSeenAt || (now - new Date(stationState.lastSeenAt)) > OFFLINE_THRESHOLD_MS;
     
     if (wasOffline) {
@@ -295,7 +295,7 @@ export const getWeatherHistory = async (req, res) => {
 export const getStationActivity = async (req, res) => {
   try {
     const now = new Date();
-    const OFFLINE_THRESHOLD_MS = 6 * 60 * 1000; // 6 mins
+    const OFFLINE_THRESHOLD_MS = 12 * 60 * 1000; // 12 minutes (allows 2 telemetry cycles of 5 min)
 
     let lastSeen = stationState.lastSeenAt;
     
