@@ -18,7 +18,7 @@ const getApiBaseUrl = () => {
     if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
       // If hosted on Vercel or cloud domain
       if (hostname.includes('vercel.app') || hostname.includes('github.io')) {
-        return envUrl || 'https://g-weather-backend.vercel.app/api';
+        return envUrl || 'https://gweather-six.vercel.app/api';
       }
       // If accessed via LAN IP on local Wi-Fi
       return `http://${hostname}:17205/api`;
