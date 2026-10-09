@@ -461,6 +461,9 @@ void handleWiFiNonBlocking() {
     if (!wifiWasConnected) {
       wifiWasConnected = true;
       Serial.println("WiFi connected");
+      // Trigger instant telemetry upload upon Wi-Fi connection
+      lastTelemetryTime = millis();
+      handleTelemetryUpload();
     }
   } else {
     if (wifiWasConnected) {
