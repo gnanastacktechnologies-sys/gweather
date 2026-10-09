@@ -1223,7 +1223,7 @@ void handleTelemetryUpload() {
 
   // Set reasonable timeout (5 seconds) and enable redirect following for Vercel HTTPS
   http.setTimeout(5000);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   if (!http.begin(client, SERVER_URL)) {
     Serial.println("[Telemetry] HTTP connection failed - Invalid URL format");
