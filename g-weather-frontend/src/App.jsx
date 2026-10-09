@@ -196,6 +196,9 @@ export default function App() {
                 <span className="footer-label">Last updated:</span>
                 <span className="footer-timestamp">{lastUpdatedFormatted || 'Just now'}</span>
               </div>
+              <div className="footer-copyright">
+                G-Weather copyright 2026 Gnanastack Technologies. All Rights reserved.
+              </div>
             </footer>
           </div>
         )}
