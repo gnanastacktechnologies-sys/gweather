@@ -1,4 +1,5 @@
 import React from 'react';
+import { BoltIcon, BatteryIcon } from './Icons';
 
 export default function PowerCard({ batteryVoltage, isUsbPower, estimatedPowerW, estimatedEnergyWh, uptimeHours }) {
   const isUsb = isUsbPower !== false && (batteryVoltage === 0 || batteryVoltage < 3.0);
@@ -8,11 +9,11 @@ export default function PowerCard({ batteryVoltage, isUsbPower, estimatedPowerW,
     <div className="card power-card">
       <div className="card-header">
         <div className="header-left">
-          <span className="card-icon">⚡</span>
-          <h2 className="card-title">Power & Hardware Efficiency</h2>
+          <div className="icon-badge"><BoltIcon className="card-svg icon-amber" /></div>
+          <h2 className="card-title">Power & Hardware Efficiency Engine</h2>
         </div>
         <span className="power-source-badge">
-          {isUsb ? '🔌 USB POWER' : '🔋 BATTERY POWER'}
+          {isUsb ? '🔌 USB POWERED' : '🔋 BATTERY POWERED'}
         </span>
       </div>
 
@@ -37,9 +38,9 @@ export default function PowerCard({ batteryVoltage, isUsbPower, estimatedPowerW,
           </div>
 
           <div className="power-box">
-            <span className="power-box-label">Uptime Hours</span>
+            <span className="power-box-label">Station Runtime</span>
             <span className="power-box-value">{uptimeHours !== undefined && uptimeHours > 0 ? `${uptimeHours} h` : 'Active'}</span>
-            <span className="power-box-sub">Station Runtime</span>
+            <span className="power-box-sub">Uptime Hours</span>
           </div>
         </div>
       </div>

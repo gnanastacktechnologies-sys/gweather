@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import StatusBadge from './StatusBadge';
+import { ClockIcon, BoltIcon } from './Icons';
 
 export default function Header({ isOnline, deviceId }) {
   const [timeStr, setTimeStr] = useState('');
@@ -23,21 +24,21 @@ export default function Header({ isOnline, deviceId }) {
         <div className="brand-text">
           <div className="brand-title-row">
             <h1 className="brand-title">G-WEATHER</h1>
-            <span className="version-chip">V3.2 + STAGE 6</span>
+            <span className="version-chip">V3.2 ULTIMATE</span>
           </div>
           <span className="brand-subtitle">Smart Village Weather Telemetry Station</span>
         </div>
       </div>
 
       <div className="header-actions">
-        <div className="clock-chip" title="Local System Time">
-          <span className="clock-icon">🕒</span>
+        <div className="clock-chip" title="System Local Time">
+          <ClockIcon className="chip-svg" />
           <span className="clock-time">{timeStr}</span>
         </div>
 
         {deviceId && (
           <div className="device-chip">
-            <span className="chip-icon">⚡</span>
+            <BoltIcon className="chip-svg text-amber" />
             <span className="chip-text">{deviceId}</span>
           </div>
         )}

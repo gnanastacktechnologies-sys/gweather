@@ -1,163 +1,111 @@
 import React, { useState, useEffect } from 'react';
 import { getStationActivity } from '../services/weatherApi';
+import { ActivityIcon, BoltIcon, DatabaseIcon } from './Icons';
 
 export default function RecentActivities() {
   const [activityData, setActivityData] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchActivities = async () => {
+  const fetchActivity = async () => {
     try {
-      const data = await getStationActivity();
-      setActivityData(data);
+      const res = await getStationActivity();
+      if (res && res.success) {
+        setActivityData(res);
+      }
     } catch (err) {
-      console.error('Activities Fetch Error:', err);
+      console.error('Activity Feed Fetch Error:', err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchActivities();
-    const interval = setInterval(fetchActivities, 10000);
+    fetchActivity();
+    const interval = setInterval(fetchActivity, 15000);
     return () => clearInterval(interval);
   }, []);
 
-  const station = activityData?.station;
-  const connectionHistory = activityData?.activities?.connectionHistory || [];
-  const weatherReportLogs = activityData?.activities?.weatherReportLogs || [];
-
-  const formatTimestamp = (rawTs) => {
-    if (!rawTs) return 'N/A';
+  const formatTime = (isoString) => {
+    if (!isoString) return '';
     try {
-      const d = new Date(rawTs);
-      if (isNaN(d.getTime())) return String(rawTs);
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
-             ' (' + d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+      const d = new Date(isoString);
+      if (isNaN(d.getTime())) return String(isoString);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     } catch (e) {
-      return String(rawTs);
+      return String(isoString);
     }
   };
 
-  const calculateRelativeTime = (rawTs) => {
-    if (!rawTs) return 'Unknown';
-    try {
-      const d = new Date(rawTs);
-      const now = new Date();
-      const diffSec = Math.max(0, Math.floor((now - d) / 1000));
-      if (diffSec < 60) return `${diffSec}s ago`;
-      if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
-      return `${Math.floor(diffSec / 3600)}h ago`;
-    } catch (e) {
-      return 'Recently';
-    }
-  };
+  const connectionLogs = activityData?.activities?.connectionHistory || [];
+  const telemetryLogs = activityData?.activities?.weatherReportLogs || [];
 
   return (
-    <div className="recent-activities-wrapper">
-      {/* SECTION 1: WEATHER STATION HARDWARE & CONNECTION ACTIVITY */}
-      <div className="card activity-card station-hardware-card">
-        <div className="card-header">
-          <div className="header-left">
-            <span className="card-icon">📡</span>
-            <h2 className="card-title">1. Weather Station Connection & Uptime</h2>
-          </div>
-
-          <div className="station-status-pill">
-            <span className={`status-indicator ${station?.status === 'ONLINE' ? 'indicator-online' : 'indicator-offline'}`}></span>
-            <span className="status-label">{station?.status || 'OFFLINE'}</span>
-          </div>
+    <div className="card activities-card">
+      <div className="card-header">
+        <div className="header-left">
+          <div className="icon-badge"><ActivityIcon className="card-svg icon-cyan" /></div>
+          <h2 className="card-title">Live Station Activity Feeds</h2>
         </div>
-
-        <div className="card-body">
-          {/* Hardware Session Info Bar */}
-          <div className="hardware-info-grid">
-            <div className="hw-info-box">
-              <span className="hw-info-label">Device ID</span>
-              <span className="hw-info-value">{station?.deviceId || 'GWEATHER-001'}</span>
-            </div>
-
-            <div className="hw-info-box">
-              <span className="hw-info-label">Active Session Uptime</span>
-              <span className="hw-info-value highlight-val">
-                {station?.uptimeHours !== undefined ? `${station.uptimeHours} hrs` : '--'}
-              </span>
-            </div>
-
-            <div className="hw-info-box">
-              <span className="hw-info-label">Session Came Online</span>
-              <span className="hw-info-value">
-                {station?.currentSessionStart ? formatTimestamp(station.currentSessionStart) : 'Recently'}
-              </span>
-            </div>
-
-            <div className="hw-info-box">
-              <span className="hw-info-label">Last Heartbeat Signal</span>
-              <span className="hw-info-value">
-                {station?.lastSeenAt ? `${calculateRelativeTime(station.lastSeenAt)}` : 'Waiting'}
-              </span>
-            </div>
-          </div>
-
-          {/* Connection Log Timeline */}
-          <div className="activity-timeline-section">
-            <h4 className="timeline-subtitle">Hardware Connection & Uptime Logs</h4>
-            <div className="activity-stream">
-              {connectionHistory.length === 0 ? (
-                <div className="stream-empty">No hardware connection logs recorded yet.</div>
-              ) : (
-                connectionHistory.map((item) => (
-                  <div key={item.id} className="stream-item connection-item">
-                    <div className="stream-badge connection-badge">📶</div>
-                    <div className="stream-content">
-                      <div className="stream-header">
-                        <span className="stream-title">{item.title}</span>
-                        <span className="stream-time">{formatTimestamp(item.timestamp)}</span>
-                      </div>
-                      <p className="stream-desc">{item.description}</p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
+        <span className="card-subtitle-badge">Dual Real-time Stream</span>
       </div>
 
-      {/* SECTION 2: WEATHER REPORT ACTIVITY (TELEMETRY LOGS) */}
-      <div className="card activity-card weather-report-card">
-        <div className="card-header">
-          <div className="header-left">
-            <span className="card-icon">⚡</span>
-            <h2 className="card-title">2. Weather Report Live Updates</h2>
+      <div className="card-body">
+        {loading ? (
+          <div className="state-container loading-state">
+            <div className="spinner"></div>
+            <span>Fetching live feed streams...</span>
           </div>
-          <div className="last-sync-badge">
-            Last Telemetry Sync: {station?.lastSeenAt ? calculateRelativeTime(station.lastSeenAt) : 'Never'}
-          </div>
-        </div>
+        ) : (
+          <div className="activities-split-grid">
+            {/* Column 1: Hardware Uptime & Connection History */}
+            <div className="activity-column">
+              <div className="activity-col-header">
+                <BoltIcon className="col-svg icon-amber" />
+                <h3 className="activity-col-title">1. Connection & Hardware Uptime</h3>
+              </div>
 
-        <div className="card-body">
-          <div className="activity-timeline-section">
-            <h4 className="timeline-subtitle">Recent Weather Telemetry Stream</h4>
-            <div className="activity-stream">
-              {weatherReportLogs.length === 0 ? (
-                <div className="stream-empty">Waiting for live weather telemetry from station...</div>
-              ) : (
-                weatherReportLogs.map((item) => (
-                  <div key={item.id} className="stream-item telemetry-item">
-                    <div className="stream-badge telemetry-badge">📊</div>
-                    <div className="stream-content">
-                      <div className="stream-header">
-                        <span className="stream-title">{item.title}</span>
-                        <span className="stream-time">{formatTimestamp(item.timestamp)}</span>
+              <div className="activity-feed-list">
+                {connectionLogs.length === 0 ? (
+                  <div className="empty-feed">No connection events recorded yet.</div>
+                ) : (
+                  connectionLogs.map((item) => (
+                    <div key={item.id} className="activity-item">
+                      <div className="activity-header-line">
+                        <span className="activity-title-text text-emerald">🟢 {item.title}</span>
+                        <span className="activity-time-text">{formatTime(item.timestamp)}</span>
                       </div>
-                      <p className="stream-desc">{item.description}</p>
+                      <div className="activity-desc-text">{item.description}</div>
                     </div>
-                  </div>
-                ))
-              )}
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Column 2: Weather Report Telemetry Feed */}
+            <div className="activity-column">
+              <div className="activity-col-header">
+                <DatabaseIcon className="col-svg icon-cyan" />
+                <h3 className="activity-col-title">2. Weather Telemetry Live Stream</h3>
+              </div>
+
+              <div className="activity-feed-list">
+                {telemetryLogs.length === 0 ? (
+                  <div className="empty-feed">Waiting for live weather packets...</div>
+                ) : (
+                  telemetryLogs.map((item) => (
+                    <div key={item.id} className="activity-item">
+                      <div className="activity-header-line">
+                        <span className="activity-title-text text-cyan">📡 {item.title}</span>
+                        <span className="activity-time-text">{formatTime(item.timestamp)}</span>
+                      </div>
+                      <div className="activity-desc-text">{item.description}</div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

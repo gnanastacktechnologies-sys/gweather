@@ -1,59 +1,56 @@
 import React from 'react';
+import { ActivityIcon, TrendingUpIcon, TrendingDownIcon } from './Icons';
 
 export default function TrendCard({ pressureTrend, temperatureTrend, humidityTrend }) {
-  const formatTrend = (trendStr) => {
-    if (!trendStr) return { text: 'STABLE', icon: '⟁', cls: 'steady' };
-    const t = trendStr.toUpperCase();
-    if (t.includes('RIS') || t.includes('UP')) return { text: 'RISING', icon: '▲', cls: 'rising' };
-    if (t.includes('FALL') || t.includes('DOWN')) return { text: 'FALLING', icon: '▼', cls: 'falling' };
-    return { text: 'STABLE', icon: '⟁', cls: 'steady' };
+  const renderTrendIcon = (trend) => {
+    const t = String(trend).toUpperCase();
+    if (t === 'RISING') return <TrendingUpIcon className="trend-svg icon-emerald" />;
+    if (t === 'FALLING') return <TrendingDownIcon className="trend-svg icon-rose" />;
+    return <ActivityIcon className="trend-svg icon-sub" />;
   };
 
-  const press = formatTrend(pressureTrend);
-  const temp = formatTrend(temperatureTrend);
-  const hum = formatTrend(humidityTrend);
+  const getTrendClass = (trend) => {
+    const t = String(trend).toUpperCase();
+    if (t === 'RISING') return 'trend-rising';
+    if (t === 'FALLING') return 'trend-falling';
+    return 'trend-steady';
+  };
 
   return (
-    <div className="weather-card glass-card trend-card">
+    <div className="card trend-card">
       <div className="card-header">
-        <div className="card-header-left">
-          <span className="card-metric-icon">📉</span>
-          <span className="card-title">1-Hour Atmospheric Trends</span>
+        <div className="header-left">
+          <div className="icon-badge"><ActivityIcon className="card-svg icon-purple" /></div>
+          <h2 className="card-title">1-Hour Sensor Trend Indicators</h2>
         </div>
         <span className="card-subtitle-badge">Sliding Buffer</span>
       </div>
-      <div className="card-body trend-list">
-        <div className="trend-item">
-          <div className="trend-info">
-            <span className="trend-icon-sm">📊</span>
-            <span className="trend-label">Barometric Pressure</span>
-          </div>
-          <span className={`trend-chip ${press.cls}`}>
-            <span className="trend-symbol">{press.icon}</span>
-            {press.text}
-          </span>
-        </div>
 
-        <div className="trend-item">
-          <div className="trend-info">
-            <span className="trend-icon-sm">🌡️</span>
-            <span className="trend-label">Temperature Vector</span>
+      <div className="card-body">
+        <div className="trends-grid">
+          <div className="trend-box">
+            <div className="trend-box-title">Pressure</div>
+            <div className={`trend-pill ${getTrendClass(pressureTrend)}`}>
+              {renderTrendIcon(pressureTrend)}
+              <span>{pressureTrend || 'STEADY'}</span>
+            </div>
           </div>
-          <span className={`trend-chip ${temp.cls}`}>
-            <span className="trend-symbol">{temp.icon}</span>
-            {temp.text}
-          </span>
-        </div>
 
-        <div className="trend-item">
-          <div className="trend-info">
-            <span className="trend-icon-sm">💧</span>
-            <span className="trend-label">Relative Humidity</span>
+          <div className="trend-box">
+            <div className="trend-box-title">Temperature</div>
+            <div className={`trend-pill ${getTrendClass(temperatureTrend)}`}>
+              {renderTrendIcon(temperatureTrend)}
+              <span>{temperatureTrend || 'STEADY'}</span>
+            </div>
           </div>
-          <span className={`trend-chip ${hum.cls}`}>
-            <span className="trend-symbol">{hum.icon}</span>
-            {hum.text}
-          </span>
+
+          <div className="trend-box">
+            <div className="trend-box-title">Humidity</div>
+            <div className={`trend-pill ${getTrendClass(humidityTrend)}`}>
+              {renderTrendIcon(humidityTrend)}
+              <span>{humidityTrend || 'STEADY'}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>

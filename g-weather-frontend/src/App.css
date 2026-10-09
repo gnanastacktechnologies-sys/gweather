@@ -1,15 +1,15 @@
 /* ============================================================================
-   G-WEATHER Village Edition — Next-Gen Cyber Glassmorphic UI (Master Redesign)
+   G-WEATHER Village Edition — Master Cyber Glassmorphic UI Design System
    ============================================================================ */
 
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
 :root {
-  /* Premium Dark Space Palette */
-  --bg-dark: #070913;
+  /* Ultra-Luxury Cyber Space Palette */
+  --bg-dark: #050811;
   --bg-card: rgba(15, 23, 42, 0.78);
   --bg-card-hover: rgba(30, 41, 59, 0.88);
-  --bg-inset: rgba(0, 0, 0, 0.35);
+  --bg-inset: rgba(0, 0, 0, 0.38);
 
   --border-card: rgba(255, 255, 255, 0.08);
   --border-glow: rgba(56, 189, 248, 0.4);
@@ -18,22 +18,22 @@
   --text-sub: #94a3b8;
   --text-muted: #64748b;
 
-  --cyan: #38bdf8;
-  --emerald: #34d399;
-  --amber: #fbbf24;
-  --purple: #c084fc;
-  --rose: #f43f5e;
+  --cyan: #00f2fe;
+  --emerald: #00f5a0;
+  --amber: #ffb703;
+  --purple: #a855f7;
+  --rose: #f72585;
 
   --font-head: 'Outfit', sans-serif;
   --font-body: 'Plus Jakarta Sans', sans-serif;
 
-  --r-xl: 20px;
-  --r-lg: 14px;
-  --r-md: 10px;
-  --r-sm: 6px;
+  --r-xl: 22px;
+  --r-lg: 16px;
+  --r-md: 12px;
+  --r-sm: 8px;
 
-  --shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-  --shadow-cyan: 0 0 20px rgba(56, 189, 248, 0.2);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  --shadow-cyan: 0 0 25px rgba(0, 242, 254, 0.2);
 }
 
 * {
@@ -46,18 +46,18 @@
 body {
   background-color: var(--bg-dark);
   background-image: 
-    radial-gradient(at 10% 10%, rgba(56, 189, 248, 0.08) 0px, transparent 50%),
-    radial-gradient(at 90% 90%, rgba(52, 211, 153, 0.06) 0px, transparent 50%);
+    radial-gradient(at 10% 10%, rgba(0, 242, 254, 0.08) 0px, transparent 50%),
+    radial-gradient(at 90% 90%, rgba(0, 245, 160, 0.06) 0px, transparent 50%);
   color: var(--text-main);
   font-family: var(--font-body);
   line-height: 1.5;
   min-height: 100vh;
 }
 
-/* Base Layout Container */
+/* Base Container */
 .app-container {
   width: 100%;
-  max-width: 1140px;
+  max-width: 1160px;
   margin: 0 auto;
   padding: 14px;
   display: flex;
@@ -71,11 +71,40 @@ body {
   }
 }
 
-/* Header Styles */
+/* SVG Icon Helpers */
+.chip-svg, .card-svg, .pill-svg, .col-svg, .trend-svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.card-svg { width: 22px; height: 22px; }
+.col-svg { width: 20px; height: 20px; }
+
+.icon-badge {
+  background: var(--bg-inset);
+  padding: 8px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-cyan { color: var(--cyan); }
+.icon-emerald { color: var(--emerald); }
+.icon-amber { color: var(--amber); }
+.icon-gold { color: var(--amber); }
+.icon-purple { color: var(--purple); }
+.icon-rose { color: var(--rose); }
+.icon-sub { color: var(--text-sub); }
+
+/* Header Navbar */
 .glass-header {
   background: var(--bg-card);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--border-card);
   border-radius: var(--r-xl);
   padding: 16px 20px;
@@ -105,8 +134,8 @@ body {
   height: 48px;
   border-radius: var(--r-lg);
   object-fit: cover;
-  border: 1.5px solid rgba(56, 189, 248, 0.4);
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+  border: 1.5px solid rgba(0, 242, 254, 0.4);
+  box-shadow: 0 0 14px rgba(0, 242, 254, 0.3);
 }
 
 .brand-title-row {
@@ -117,8 +146,8 @@ body {
 
 .brand-title {
   font-family: var(--font-head);
-  font-size: 1.4rem;
-  font-weight: 800;
+  font-size: 1.45rem;
+  font-weight: 900;
   letter-spacing: 0.04em;
   background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
   -webkit-background-clip: text;
@@ -129,11 +158,11 @@ body {
 .version-chip {
   font-size: 0.65rem;
   font-weight: 800;
-  background: rgba(56, 189, 248, 0.15);
+  background: rgba(0, 242, 254, 0.15);
   color: var(--cyan);
   padding: 2px 8px;
   border-radius: 9999px;
-  border: 1px solid rgba(56, 189, 248, 0.3);
+  border: 1px solid rgba(0, 242, 254, 0.3);
 }
 
 .brand-subtitle {
@@ -154,7 +183,7 @@ body {
   gap: 6px;
   background: var(--bg-inset);
   border: 1px solid var(--border-card);
-  padding: 6px 12px;
+  padding: 6px 14px;
   border-radius: 9999px;
   font-size: 0.78rem;
   font-weight: 600;
@@ -164,7 +193,7 @@ body {
 .clock-time {
   font-family: var(--font-head);
   color: var(--cyan);
-  font-weight: 700;
+  font-weight: 800;
 }
 
 .status-badge-glow {
@@ -180,16 +209,16 @@ body {
 }
 
 .badge-online {
-  background: rgba(52, 211, 153, 0.15);
+  background: rgba(0, 245, 160, 0.15);
   color: var(--emerald);
-  border: 1px solid rgba(52, 211, 153, 0.35);
-  box-shadow: 0 0 12px rgba(52, 211, 153, 0.2);
+  border: 1px solid rgba(0, 245, 160, 0.35);
+  box-shadow: 0 0 12px rgba(0, 245, 160, 0.2);
 }
 
 .badge-offline {
-  background: rgba(244, 63, 94, 0.15);
+  background: rgba(247, 37, 133, 0.15);
   color: var(--rose);
-  border: 1px solid rgba(244, 63, 94, 0.35);
+  border: 1px solid rgba(247, 37, 133, 0.35);
 }
 
 .status-dot {
@@ -199,21 +228,21 @@ body {
   background-color: currentColor;
 }
 
-/* Main Dashboard Grid */
+/* Dashboard Layout */
 .dashboard-grid {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-/* Glass Card Base */
+/* Cards Base */
 .glass-card, .card {
   background: var(--bg-card);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-card);
   border-radius: var(--r-xl);
-  padding: 18px;
+  padding: 20px;
   box-shadow: var(--shadow);
   transition: border-color 0.2s ease, transform 0.2s ease;
 }
@@ -222,12 +251,12 @@ body {
   border-color: var(--border-glow);
 }
 
-/* Hero Weather Banner Card */
+/* Master Hero Card */
 .hero-weather-card {
   background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%);
   border: 1px solid var(--border-glow);
   box-shadow: var(--shadow-cyan);
-  padding: 22px;
+  padding: 24px;
 }
 
 .hero-main-row {
@@ -244,6 +273,15 @@ body {
   }
 }
 
+.hero-title {
+  font-family: var(--font-head);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-sub);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 .hero-temp-block {
   display: flex;
   align-items: baseline;
@@ -251,7 +289,7 @@ body {
 
 .hero-temp-val {
   font-family: var(--font-head);
-  font-size: 4.2rem;
+  font-size: 4.4rem;
   font-weight: 900;
   color: #ffffff;
   line-height: 1;
@@ -315,7 +353,7 @@ body {
   margin-top: 2px;
 }
 
-/* Metrics 3-Card Grid */
+/* Metrics Grid */
 .metrics-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -341,14 +379,10 @@ body {
   margin-bottom: 12px;
 }
 
-.card-header-left {
+.card-header-left, .header-left {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.card-metric-icon {
-  font-size: 1.2rem;
+  gap: 10px;
 }
 
 .card-title {
@@ -356,6 +390,15 @@ body {
   font-size: 0.95rem;
   font-weight: 700;
   color: var(--text-main);
+}
+
+.card-subtitle-badge {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  background: var(--bg-inset);
+  padding: 3px 8px;
+  border-radius: 9999px;
+  border: 1px solid var(--border-card);
 }
 
 .card-value-group {
@@ -402,11 +445,11 @@ body {
   font-size: 0.82rem;
 }
 
-.status-glow-dry { background: rgba(52, 211, 153, 0.15); color: var(--emerald); border: 1px solid rgba(52, 211, 153, 0.3); }
-.status-glow-watch { background: rgba(251, 191, 36, 0.15); color: var(--amber); border: 1px solid rgba(251, 191, 36, 0.3); }
-.status-glow-possible { background: rgba(192, 132, 252, 0.15); color: var(--purple); border: 1px solid rgba(192, 132, 252, 0.3); }
-.status-glow-likely { background: rgba(56, 189, 248, 0.15); color: var(--cyan); border: 1px solid rgba(56, 189, 248, 0.3); }
-.status-glow-raining { background: rgba(244, 63, 94, 0.2); color: var(--rose); border: 1px solid rgba(244, 63, 94, 0.4); }
+.status-glow-dry { background: rgba(0, 245, 160, 0.15); color: var(--emerald); border: 1px solid rgba(0, 245, 160, 0.3); }
+.status-glow-watch { background: rgba(255, 183, 3, 0.15); color: var(--amber); border: 1px solid rgba(255, 183, 3, 0.3); }
+.status-glow-possible { background: rgba(168, 85, 247, 0.15); color: var(--purple); border: 1px solid rgba(168, 85, 247, 0.3); }
+.status-glow-likely { background: rgba(0, 242, 254, 0.15); color: var(--cyan); border: 1px solid rgba(0, 242, 254, 0.3); }
+.status-glow-raining { background: rgba(247, 37, 133, 0.2); color: var(--rose); border: 1px solid rgba(247, 37, 133, 0.4); }
 
 .progress-bar-container {
   width: 100%;
@@ -423,15 +466,15 @@ body {
   transition: width 0.4s ease;
 }
 
-/* Power & Efficiency Card */
+/* Power Card */
 .power-source-badge {
   font-size: 0.7rem;
   font-weight: 800;
   padding: 4px 10px;
   border-radius: 9999px;
-  background: rgba(251, 191, 36, 0.15);
+  background: rgba(255, 183, 3, 0.15);
   color: var(--amber);
-  border: 1px solid rgba(251, 191, 36, 0.3);
+  border: 1px solid rgba(255, 183, 3, 0.3);
 }
 
 .power-metrics-grid {
@@ -470,16 +513,14 @@ body {
   margin: 2px 0;
 }
 
-.highlight-gold {
-  color: var(--amber);
-}
+.highlight-gold { color: var(--amber); }
 
 .power-box-sub {
   font-size: 0.65rem;
   color: var(--text-muted);
 }
 
-/* Trends Grid */
+/* Trends Card */
 .trends-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -502,14 +543,17 @@ body {
 }
 
 .trend-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 0.72rem;
   font-weight: 700;
-  padding: 2px 8px;
+  padding: 3px 8px;
   border-radius: var(--r-sm);
 }
 
-.trend-rising { background: rgba(52, 211, 153, 0.15); color: var(--emerald); }
-.trend-falling { background: rgba(244, 63, 94, 0.15); color: var(--rose); }
+.trend-rising { background: rgba(0, 245, 160, 0.15); color: var(--emerald); }
+.trend-falling { background: rgba(247, 37, 133, 0.15); color: var(--rose); }
 .trend-steady, .trend-stable { background: rgba(148, 163, 184, 0.15); color: var(--text-sub); }
 
 /* Split Activities */
@@ -532,12 +576,18 @@ body {
   padding: 14px;
 }
 
+.activity-col-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .activity-col-title {
   font-family: var(--font-head);
   font-size: 0.88rem;
   font-weight: 700;
   color: var(--text-main);
-  margin-bottom: 10px;
 }
 
 .activity-item {
@@ -559,7 +609,6 @@ body {
 .activity-title-text {
   font-size: 0.75rem;
   font-weight: 700;
-  color: var(--text-main);
 }
 
 .activity-time-text {
@@ -572,7 +621,7 @@ body {
   color: var(--text-sub);
 }
 
-/* History Card */
+/* History Card & Controls */
 .history-controls {
   display: flex;
   gap: 6px;
@@ -593,9 +642,9 @@ body {
 }
 
 .filter-btn.active {
-  background: rgba(56, 189, 248, 0.2);
+  background: rgba(0, 242, 254, 0.2);
   color: var(--cyan);
-  border-color: rgba(56, 189, 248, 0.4);
+  border-color: rgba(0, 242, 254, 0.4);
 }
 
 .table-responsive {
@@ -627,6 +676,19 @@ body {
   color: var(--text-main);
   white-space: nowrap;
 }
+
+.table-status-tag {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+}
+
+.tag-dry { background: rgba(0, 245, 160, 0.15); color: var(--emerald); }
+.tag-watch { background: rgba(255, 183, 3, 0.15); color: var(--amber); }
+.tag-possible { background: rgba(168, 85, 247, 0.15); color: var(--purple); }
+.tag-likely { background: rgba(0, 242, 254, 0.15); color: var(--cyan); }
+.tag-raining { background: rgba(247, 37, 133, 0.2); color: var(--rose); }
 
 /* Footer Section */
 .dashboard-footer {
@@ -664,4 +726,39 @@ body {
   font-size: 0.78rem;
   font-weight: 600;
   color: var(--text-muted);
+}
+
+/* Loading & Error States */
+.state-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+}
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(0, 242, 254, 0.2);
+  border-top-color: var(--cyan);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.retry-btn {
+  background: var(--cyan);
+  color: #050811;
+  font-weight: 800;
+  border: none;
+  padding: 10px 22px;
+  border-radius: 9999px;
+  margin-top: 16px;
+  cursor: pointer;
 }
