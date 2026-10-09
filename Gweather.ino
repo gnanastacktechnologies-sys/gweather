@@ -2,7 +2,7 @@
  * ============================================================================
  * G-WEATHER Village Edition — Master Firmware V3.2 + Stage 6 Telemetry
  * ============================================================================
- * Target Hardware: ESP32 DevKit V1 30-Pin
+ * Target Hardware: ESP32 DevKit V1 38-Pin
  *
  * Hardware Pinout (LOCKED SPECIFICATION — DO NOT CHANGE):
  * - DHT22:         DATA -> GPIO4
@@ -22,11 +22,16 @@
  * - Page 4: Ambient Light (Lux, Solar Condition)
  * - Page 5: Rain Possibility (%, Progress Bar, Classification)
  * - Page 6: Rain Status (RAINING / LIKELY / POSSIBLE / WATCH / DRY)
- * - Page 7: Power (USB POWER / Battery Voltage)
+ * - Page 7: Power (USB POWER / Battery Voltage + Estimated W, Wh, Runtime)
  * - Page 8: Date & Time (Centered: 12H Time AM/PM, DD MON YYYY, Weekday)
  *
  * Stage 6 Telemetry:
- * - Non-blocking HTTP POST upload every 60 seconds to Express API
+ * - HTTP POST upload to Express API
+ *
+ * POWER MONITOR:
+ * - Software estimate only; no physical current sensor installed.
+ * - Displays estimated watts, accumulated Wh, and uptime on Page 7.
+ * - Accumulated Wh and uptime reset when the ESP32 restarts.
  * ============================================================================
  */
 
@@ -46,8 +51,8 @@
 // ============================================================================
 // WIFI CONFIGURATION (STAGE 2)
 // ============================================================================
-const char* WIFI_SSID     = "Jio 5G";     // Mobile hotspot SSID placeholder
-const char* WIFI_PASSWORD = "123456789"; // Mobile hotspot password placeholder
+const char* WIFI_SSID     = "Jio 5G";
+const char* WIFI_PASSWORD = "123456789";
 
 // ============================================================================
 // STAGE 6: TELEMETRY SERVER CONFIGURATION
@@ -88,7 +93,8 @@ const char monthNamesUpper[12][4] = {
 };
 
 const char daysOfWeekUpper[7][10] = {
-  "SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"
+  "SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY",
+  "THURSDAY", "FRIDAY", "SATURDAY"
 };
 
 // ============================================================================
@@ -97,7 +103,7 @@ const char daysOfWeekUpper[7][10] = {
 DHT dht(DHT_PIN, DHT_TYPE);
 Adafruit_BMP280 bmp;
 RTC_DS1307 rtc;
-BH1750 lightMeter(0x5C); // BH1750 on address 0x5C
+BH1750 lightMeter(0x5C);
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 
 // ============================================================================
@@ -109,6 +115,7 @@ struct WeatherData {
   float pressure = 0.0;
   float altitude = 0.0;
   float lux = 0.0;
+
   int rainRaw = 4095;
   float rainFiltered = 4095.0;
   float rainProbability = 0.0;
@@ -128,6 +135,11 @@ struct WeatherData {
   // Battery / Power
   float batteryVoltage = 0.0;
   bool isUsbPower = true;
+
+  // Estimated power monitor (software estimate only)
+  float estimatedCurrentMA = 0.0;
+  float estimatedPowerW = 0.0;
+  double estimatedEnergyWh = 0.0;
 };
 
 WeatherData weather;
@@ -141,26 +153,42 @@ bool sdAvailable = false;
 // Wi-Fi Connection Tracking
 bool wifiWasConnected = false;
 unsigned long lastWifiRetryTime = 0;
-const unsigned long WIFI_RETRY_INTERVAL = 10000; // 10 seconds non-blocking retry
+
+const unsigned long WIFI_RETRY_INTERVAL = 10000;
+const unsigned long WIFI_RETRY_MAX_INTERVAL = 60000;
+
+unsigned long currentWifiRetryInterval = WIFI_RETRY_INTERVAL;
 
 // Non-Blocking Timers
 unsigned long lastSensorReadTime = 0;
-const unsigned long SENSOR_READ_INTERVAL = 2000;  // Every 2 seconds
+const unsigned long SENSOR_READ_INTERVAL = 10000;
 
 unsigned long lastTftPageTime = 0;
-const unsigned long TFT_PAGE_INTERVAL = 5000;     // V3.2 Page rotation every 5 seconds
+const unsigned long TFT_PAGE_INTERVAL = 5000;
 
 unsigned long lastTftRefreshTime = 0;
-const unsigned long TFT_REFRESH_INTERVAL = 1000;  // Dynamic text refresh every 1 sec
+const unsigned long TFT_REFRESH_INTERVAL = 2000;
 
 unsigned long lastSdLogTime = 0;
-const unsigned long SD_LOG_INTERVAL = 60000;       // SD log every 60 seconds (1 min)
+const unsigned long SD_LOG_INTERVAL = 60000;
 
 unsigned long lastTelemetryTime = 0;
-const unsigned long TELEMETRY_INTERVAL = 60000;    // Telemetry POST every 60 seconds (1 min)
+const unsigned long TELEMETRY_INTERVAL = 300000;
 
 unsigned long lastHistorySampleTime = 0;
-const unsigned long HISTORY_SAMPLE_INTERVAL = 600000; // 10 mins for trend calculation
+const unsigned long HISTORY_SAMPLE_INTERVAL = 600000;
+
+// ============================================================================
+// ESTIMATED POWER MONITOR CONFIGURATION
+// ============================================================================
+const float EST_SUPPLY_VOLTAGE = 5.0f;
+const float EST_ESP32_BASE_MA = 95.0f;
+const float EST_WIFI_EXTRA_MA = 45.0f;
+const float EST_TFT_MA = 25.0f;
+const float EST_SENSORS_MA = 8.0f;
+const float EST_SD_AVERAGE_MA = 3.0f;
+
+unsigned long lastPowerUpdateTime = 0;
 
 // TFT V3.2 8-Page Management
 uint8_t currentTftPage = 0;
@@ -172,6 +200,7 @@ const int TREND_SAMPLES = 6;
 float tempHistory[TREND_SAMPLES];
 float humHistory[TREND_SAMPLES];
 float pressHistory[TREND_SAMPLES];
+
 int historyIndex = 0;
 int historySampleCount = 0;
 
@@ -195,6 +224,7 @@ String getFormattedDateDDMONYYYY();
 String getDayOfWeekNameUpper();
 String getFormattedISO8601Timestamp();
 void handleTelemetryUpload();
+void updatePowerEstimate();
 
 // ============================================================================
 // SETUP FUNCTION
@@ -202,6 +232,7 @@ void handleTelemetryUpload();
 void setup() {
   Serial.begin(115200);
   delay(500);
+
   Serial.println("\n=============================================");
   Serial.println(" G-WEATHER Village Edition — V3.2 Startup");
   Serial.println(" Mobile Hotspot & Stage 6 Telemetry Active");
@@ -210,6 +241,7 @@ void setup() {
   // Deselect SPI CS pins before SPI initialization to ensure SPI bus safety
   pinMode(TFT_CS, OUTPUT);
   digitalWrite(TFT_CS, HIGH);
+
   pinMode(SD_CS, OUTPUT);
   digitalWrite(SD_CS, HIGH);
 
@@ -222,17 +254,24 @@ void setup() {
   // Initialize Hardware Peripherals
   initPeripherals();
 
-  // Initialize Wi-Fi in Station Mode (Non-Blocking Startup)
-  WiFi.persistent(false); // Protect flash from continuous writes
+  // Initialize Wi-Fi in Station Mode
+  WiFi.persistent(false);
+  setCpuFrequencyMhz(80);
+  WiFi.setSleep(true);
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
   Serial.println("Wi-Fi connecting...");
 
   // Initial Data Sample
   readSensors();
   applyV2Intelligence();
 
-  // Initial Full TFT Render (V3.2 Deep Navy Background)
+  // Initialize power monitor timer after initial sensor setup
+  lastPowerUpdateTime = millis();
+  updatePowerEstimate();
+
+  // Initial Full TFT Render
   tft.fillScreen(COLOR_NAVY);
   drawTFTPage(currentTftPage, true);
 
@@ -249,39 +288,44 @@ void loop() {
   // 1. Non-Blocking Mobile Hotspot Connection Monitor
   handleWiFiNonBlocking();
 
-  // 2. Periodic Sensor Sampling & V2 Intelligence Calculation (Every 2s)
+  // 2. Update estimated power and accumulated energy
+  updatePowerEstimate();
+
+  // 3. Periodic Sensor Sampling
   if (currentMillis - lastSensorReadTime >= SENSOR_READ_INTERVAL) {
     lastSensorReadTime = currentMillis;
     readSensors();
     applyV2Intelligence();
   }
 
-  // 3. Periodic History Sampling for Trend Analysis (Every 10 mins)
-  if (currentMillis - lastHistorySampleTime >= HISTORY_SAMPLE_INTERVAL || historySampleCount == 0) {
+  // 4. Periodic History Sampling for Trend Analysis
+  if (currentMillis - lastHistorySampleTime >= HISTORY_SAMPLE_INTERVAL ||
+      historySampleCount == 0) {
     lastHistorySampleTime = currentMillis;
     updateTrends();
   }
 
-  // 4. SD Card Logging (Every 1 Minute)
+  // 5. SD Card Logging
   if (currentMillis - lastSdLogTime >= SD_LOG_INTERVAL) {
     lastSdLogTime = currentMillis;
     logToSDCard();
   }
 
-  // 5. TFT Page Auto-Rotation (Every 5 seconds — Exact V3.2 Timing)
+  // 6. TFT Page Auto-Rotation
   if (currentMillis - lastTftPageTime >= TFT_PAGE_INTERVAL) {
     lastTftPageTime = currentMillis;
     currentTftPage = (currentTftPage + 1) % TOTAL_TFT_PAGES;
     pageNeedsFullRedraw = true;
   }
 
-  // 6. TFT Screen Refresh (Every 1 sec, Zero-Flicker dynamic text update)
-  if (currentMillis - lastTftRefreshTime >= TFT_REFRESH_INTERVAL || pageNeedsFullRedraw) {
+  // 7. TFT Screen Refresh
+  if (currentMillis - lastTftRefreshTime >= TFT_REFRESH_INTERVAL ||
+      pageNeedsFullRedraw) {
     lastTftRefreshTime = currentMillis;
     updateTFTDisplay();
   }
 
-  // 7. Live Telemetry Upload to Express API (Every 60 seconds)
+  // 8. Live Telemetry Upload to Express API
   if (currentMillis - lastTelemetryTime >= TELEMETRY_INTERVAL) {
     lastTelemetryTime = currentMillis;
     handleTelemetryUpload();
@@ -289,6 +333,41 @@ void loop() {
 
   // Small CPU yield for ESP32 background tasks
   yield();
+}
+
+// ============================================================================
+// ESTIMATED POWER CONSUMPTION AND ENERGY MONITOR
+// ============================================================================
+void updatePowerEstimate() {
+  unsigned long currentMillis = millis();
+
+  // Estimate active electronics current
+  float estimatedCurrent = EST_ESP32_BASE_MA
+                         + EST_TFT_MA
+                         + EST_SENSORS_MA
+                         + EST_SD_AVERAGE_MA;
+
+  // Add estimated Wi-Fi consumption when connected
+  if (WiFi.status() == WL_CONNECTED) {
+    estimatedCurrent += EST_WIFI_EXTRA_MA;
+  }
+
+  weather.estimatedCurrentMA = estimatedCurrent;
+
+  // Power (W) = Supply Voltage (V) x Current (A)
+  weather.estimatedPowerW =
+      (EST_SUPPLY_VOLTAGE * weather.estimatedCurrentMA) / 1000.0f;
+
+  // Accumulate estimated energy in Wh
+  if (lastPowerUpdateTime != 0) {
+    unsigned long elapsedMillis = currentMillis - lastPowerUpdateTime;
+
+    weather.estimatedEnergyWh +=
+        ((double)weather.estimatedPowerW * (double)elapsedMillis)
+        / 3600000.0;
+  }
+
+  lastPowerUpdateTime = currentMillis;
 }
 
 // ============================================================================
@@ -302,11 +381,15 @@ void initPeripherals() {
   // 2. BMP280
   if (bmp.begin(0x76)) {
     bmpAvailable = true;
-    bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,
-                    Adafruit_BMP280::SAMPLING_X2,
-                    Adafruit_BMP280::SAMPLING_X16,
-                    Adafruit_BMP280::FILTER_X16,
-                    Adafruit_BMP280::STANDBY_MS_500);
+
+    bmp.setSampling(
+      Adafruit_BMP280::MODE_NORMAL,
+      Adafruit_BMP280::SAMPLING_X2,
+      Adafruit_BMP280::SAMPLING_X16,
+      Adafruit_BMP280::FILTER_X16,
+      Adafruit_BMP280::STANDBY_MS_500
+    );
+
     Serial.println("[Hardware] BMP280 sensor detected at 0x76.");
   } else {
     Serial.println("[Hardware Warning] BMP280 not detected at 0x76.");
@@ -315,6 +398,7 @@ void initPeripherals() {
   // 3. DS1307 RTC
   if (rtc.begin()) {
     rtcAvailable = true;
+
     if (!rtc.isrunning()) {
       Serial.println("[Hardware Warning] RTC is NOT running! Setting build time.");
       rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
@@ -335,7 +419,7 @@ void initPeripherals() {
 
   // 5. ST7735 TFT Display
   tft.initR(INITR_BLACKTAB);
-  tft.setRotation(0); // 128x160 Portrait
+  tft.setRotation(0);
   tft.fillScreen(COLOR_NAVY);
   Serial.println("[Hardware] ST7735 TFT Display initialized.");
 
@@ -347,8 +431,14 @@ void initPeripherals() {
     // Check if log file exists, if not write header
     if (!SD.exists("/weather_log.csv")) {
       File logFile = SD.open("/weather_log.csv", FILE_WRITE);
+
       if (logFile) {
-        logFile.println("Timestamp,Temp_C,Hum_Pct,Press_hPa,Lux,Rain_Raw,Rain_Filt,Rain_Prob_Pct,Rain_Status,Temp_Trend,Hum_Trend,Press_Trend,Temp_Min24h,Temp_Max24h,Hum_Min24h,Hum_Max24h,WiFi_Status");
+        logFile.println(
+          "Timestamp,Temp_C,Hum_Pct,Press_hPa,Lux,Rain_Raw,Rain_Filt,"
+          "Rain_Prob_Pct,Rain_Status,Temp_Trend,Hum_Trend,Press_Trend,"
+          "Temp_Min24h,Temp_Max24h,Hum_Min24h,Hum_Max24h,WiFi_Status"
+        );
+
         logFile.close();
         Serial.println("[SD Card] Created /weather_log.csv with headers.");
       }
@@ -365,6 +455,8 @@ void handleWiFiNonBlocking() {
   wl_status_t currentStatus = WiFi.status();
 
   if (currentStatus == WL_CONNECTED) {
+    currentWifiRetryInterval = WIFI_RETRY_INTERVAL;
+
     if (!wifiWasConnected) {
       wifiWasConnected = true;
       Serial.println("WiFi connected");
@@ -376,14 +468,26 @@ void handleWiFiNonBlocking() {
       Serial.println("Retrying...");
     }
 
-    // Periodically re-trigger non-blocking connection attempt if disconnected
     unsigned long currentMillis = millis();
-    if (currentMillis - lastWifiRetryTime >= WIFI_RETRY_INTERVAL) {
+
+    if (currentMillis - lastWifiRetryTime >= currentWifiRetryInterval) {
       lastWifiRetryTime = currentMillis;
-      if (currentStatus != WL_DISCONNECTED && currentStatus != WL_IDLE_STATUS) {
+
+      if (currentStatus != WL_DISCONNECTED &&
+          currentStatus != WL_IDLE_STATUS) {
         WiFi.disconnect();
       }
+
       WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+      // Back off between failed attempts: 10, 20, 40, then 60 seconds maximum.
+      if (currentWifiRetryInterval < WIFI_RETRY_MAX_INTERVAL) {
+        currentWifiRetryInterval *= 2;
+
+        if (currentWifiRetryInterval > WIFI_RETRY_MAX_INTERVAL) {
+          currentWifiRetryInterval = WIFI_RETRY_MAX_INTERVAL;
+        }
+      }
     }
   }
 }
@@ -395,15 +499,22 @@ void readSensors() {
   // Read DHT22
   float t = dht.readTemperature();
   float h = dht.readHumidity();
+
   if (!isnan(t)) weather.temperature = t;
   if (!isnan(h)) weather.humidity = h;
 
   // Read BMP280
   if (bmpAvailable) {
-    float p = bmp.readPressure() / 100.0F; // Convert Pa to hPa
+    float p = bmp.readPressure() / 100.0F;
     float alt = bmp.readAltitude(1013.25);
-    if (!isnan(p) && p > 300.0 && p < 1100.0) weather.pressure = p;
-    if (!isnan(alt)) weather.altitude = alt;
+
+    if (!isnan(p) && p > 300.0 && p < 1100.0) {
+      weather.pressure = p;
+    }
+
+    if (!isnan(alt)) {
+      weather.altitude = alt;
+    }
   }
 
   // Read RTC Time
@@ -414,7 +525,10 @@ void readSensors() {
   // Read BH1750 Lux
   if (bh1750Available) {
     float l = lightMeter.readLightLevel();
-    if (l >= 0.0) weather.lux = l;
+
+    if (l >= 0.0) {
+      weather.lux = l;
+    }
   }
 
   // Read Rain Sensor (Analog GPIO34)
@@ -423,14 +537,15 @@ void readSensors() {
 
   // Rain Exponential Moving Average (EMA) Noise Filter (alpha = 0.15)
   const float alpha = 0.15;
-  weather.rainFiltered = (alpha * rawRain) + ((1.0 - alpha) * weather.rainFiltered);
+  weather.rainFiltered =
+      (alpha * rawRain) + ((1.0 - alpha) * weather.rainFiltered);
 
   // Read Battery Divider (GPIO35 with 10.04kΩ upper + 9.90kΩ lower divider)
   int battRaw = analogRead(BATTERY_PIN);
-  const float dividerRatio = (10.04 + 9.90) / 9.90; // approx 2.01414
+  const float dividerRatio = (10.04 + 9.90) / 9.90;
   weather.batteryVoltage = (battRaw / 4095.0) * 3.3 * dividerRatio;
-  
-  // Flag testing/USB power state if battery voltage is unpowered/floating below threshold
+
+  // Flag testing/USB power state if battery voltage is below threshold
   weather.isUsbPower = (weather.batteryVoltage < 3.0);
 }
 
@@ -439,9 +554,10 @@ void readSensors() {
 // ============================================================================
 void applyV2Intelligence() {
   // 1. Rain Wetness Percentage Calculation (4095 = Dry, <=1000 = Saturated)
-  float wetnessPct = map(constrain((int)weather.rainFiltered, 1000, 4095), 4095, 1000, 0, 100);
+  float wetnessPct =
+      map(constrain((int)weather.rainFiltered, 1000, 4095), 4095, 1000, 0, 100);
 
-  // 2. Barometric & Atmospheric Rain Probability Calculation (V2 Intelligence)
+  // 2. Barometric & Atmospheric Rain Probability Calculation
   float prob = 0.0;
 
   // Rain sensor wetness contribution
@@ -449,12 +565,12 @@ void applyV2Intelligence() {
     prob += wetnessPct * 0.8;
   }
 
-  // Humidity contribution (Base score if > 60%)
+  // Humidity contribution
   if (weather.humidity > 60.0) {
     prob += (weather.humidity - 60.0) * 1.0;
   }
 
-  // Pressure contribution (Standard sea level = 1013.25 hPa)
+  // Pressure contribution
   if (weather.pressure > 0.0 && weather.pressure < 1013.25) {
     prob += (1013.25 - weather.pressure) * 1.5;
   }
@@ -476,7 +592,7 @@ void applyV2Intelligence() {
 
   weather.rainProbability = constrain(prob, 0.0, 100.0);
 
-  // 3. Approved V2 Rain Status Classifications (RAINING, LIKELY, POSSIBLE, WATCH, DRY)
+  // 3. Approved V2 Rain Status Classifications
   if (wetnessPct > 20.0) {
     weather.rainStatus = "RAINING";
   } else if (weather.rainProbability >= 70.0) {
@@ -502,7 +618,10 @@ void updateTrends() {
   pressHistory[historyIndex] = weather.pressure;
 
   historyIndex = (historyIndex + 1) % TREND_SAMPLES;
-  if (historySampleCount < TREND_SAMPLES) historySampleCount++;
+
+  if (historySampleCount < TREND_SAMPLES) {
+    historySampleCount++;
+  }
 
   // Need at least 2 historical samples before calculating trend direction
   if (historySampleCount < 2) {
@@ -512,22 +631,26 @@ void updateTrends() {
     return;
   }
 
-  int prevIdx = (historyIndex - historySampleCount + TREND_SAMPLES) % TREND_SAMPLES;
+  int prevIdx =
+      (historyIndex - historySampleCount + TREND_SAMPLES) % TREND_SAMPLES;
 
-  // Temp Trend (> +0.3°C = RISING, < -0.3°C = FALLING, else STABLE)
+  // Temp Trend
   float dTemp = weather.temperature - tempHistory[prevIdx];
+
   if (dTemp > 0.3) weather.tempTrend = "RISING";
   else if (dTemp < -0.3) weather.tempTrend = "FALLING";
   else weather.tempTrend = "STABLE";
 
-  // Humidity Trend (> +1.0% = RISING, < -1.0% = FALLING, else STABLE)
+  // Humidity Trend
   float dHum = weather.humidity - humHistory[prevIdx];
+
   if (dHum > 1.0) weather.humTrend = "RISING";
   else if (dHum < -1.0) weather.humTrend = "FALLING";
   else weather.humTrend = "STABLE";
 
-  // Pressure Trend (> +0.5 hPa = RISING, < -0.5 hPa = FALLING, else STABLE)
+  // Pressure Trend
   float dPress = weather.pressure - pressHistory[prevIdx];
+
   if (dPress > 0.5) weather.pressTrend = "RISING";
   else if (dPress < -0.5) weather.pressTrend = "FALLING";
   else weather.pressTrend = "STABLE";
@@ -539,23 +662,36 @@ void updateTrends() {
 void update24HourStats() {
   // Midnight reset check using RTC
   static int lastDay = -1;
+
   if (rtcAvailable) {
     int currentDay = nowRTC.day();
+
     if (lastDay != -1 && currentDay != lastDay) {
-      // Reset bounds at midnight
       weather.tempMin24h = weather.temperature;
       weather.tempMax24h = weather.temperature;
       weather.humMin24h = weather.humidity;
       weather.humMax24h = weather.humidity;
     }
+
     lastDay = currentDay;
   }
 
   // Update bounds
-  if (weather.temperature < weather.tempMin24h) weather.tempMin24h = weather.temperature;
-  if (weather.temperature > weather.tempMax24h) weather.tempMax24h = weather.temperature;
-  if (weather.humidity < weather.humMin24h) weather.humMin24h = weather.humidity;
-  if (weather.humidity > weather.humMax24h) weather.humMax24h = weather.humidity;
+  if (weather.temperature < weather.tempMin24h) {
+    weather.tempMin24h = weather.temperature;
+  }
+
+  if (weather.temperature > weather.tempMax24h) {
+    weather.tempMax24h = weather.temperature;
+  }
+
+  if (weather.humidity < weather.humMin24h) {
+    weather.humMin24h = weather.humidity;
+  }
+
+  if (weather.humidity > weather.humMax24h) {
+    weather.humMax24h = weather.humidity;
+  }
 }
 
 // ============================================================================
@@ -565,42 +701,61 @@ void logToSDCard() {
   if (!sdAvailable) return;
 
   File logFile = SD.open("/weather_log.csv", FILE_APPEND);
+
   if (logFile) {
     logFile.print(getFormattedDateDDMONYYYY());
     logFile.print(" ");
     logFile.print(getFormattedTime12HNoSec());
     logFile.print(",");
+
     logFile.print(weather.temperature, 2);
     logFile.print(",");
+
     logFile.print(weather.humidity, 2);
     logFile.print(",");
+
     logFile.print(weather.pressure, 2);
     logFile.print(",");
+
     logFile.print(weather.lux, 1);
     logFile.print(",");
+
     logFile.print(weather.rainRaw);
     logFile.print(",");
+
     logFile.print(weather.rainFiltered, 1);
     logFile.print(",");
+
     logFile.print(weather.rainProbability, 1);
     logFile.print(",");
+
     logFile.print(weather.rainStatus);
     logFile.print(",");
+
     logFile.print(weather.tempTrend);
     logFile.print(",");
+
     logFile.print(weather.humTrend);
     logFile.print(",");
+
     logFile.print(weather.pressTrend);
     logFile.print(",");
+
     logFile.print(weather.tempMin24h, 1);
     logFile.print(",");
+
     logFile.print(weather.tempMax24h, 1);
     logFile.print(",");
+
     logFile.print(weather.humMin24h, 1);
     logFile.print(",");
+
     logFile.print(weather.humMax24h, 1);
     logFile.print(",");
-    logFile.println(WiFi.status() == WL_CONNECTED ? "Connected" : "Disconnected");
+
+    logFile.println(
+        WiFi.status() == WL_CONNECTED ? "Connected" : "Disconnected"
+    );
 
     logFile.close();
     Serial.println("[SD Log] Data log entry written to /weather_log.csv");
@@ -637,17 +792,22 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
     case 0: // PAGE 1: TEMPERATURE
       if (fullRedraw) {
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-        tft.setCursor(31, 30); tft.print("TEMPERATURE");
-        
+        tft.setCursor(31, 30);
+        tft.print("TEMPERATURE");
+
         tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
-        tft.setCursor(16, 86); tft.print("24h MIN");
-        tft.setCursor(16, 100); tft.print("24h MAX");
+        tft.setCursor(16, 86);
+        tft.print("24h MIN");
+
+        tft.setCursor(16, 100);
+        tft.print("24h MAX");
       }
 
       // Large Prominent Temperature
       {
         String tempVal = String(weather.temperature, 1) + " C";
         int tempX = (128 - (tempVal.length() * 12)) / 2;
+
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
         tft.setCursor(tempX > 0 ? tempX : 0, 54);
@@ -657,12 +817,19 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
       // 24h Bounds
       tft.setTextSize(1);
       tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
-      tft.setCursor(68, 86);  tft.print(weather.tempMin24h, 1); tft.print(" C   ");
-      tft.setCursor(68, 100); tft.print(weather.tempMax24h, 1); tft.print(" C   ");
 
-      // Trend (RISING / STABLE / FALLING)
+      tft.setCursor(68, 86);
+      tft.print(weather.tempMin24h, 1);
+      tft.print(" C   ");
+
+      tft.setCursor(68, 100);
+      tft.print(weather.tempMax24h, 1);
+      tft.print(" C   ");
+
+      // Trend
       {
         int trendX = (128 - (weather.tempTrend.length() * 6)) / 2;
+
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
         tft.setCursor(trendX > 0 ? trendX : 0, 118);
         tft.print(weather.tempTrend);
@@ -673,17 +840,22 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
     case 1: // PAGE 2: HUMIDITY
       if (fullRedraw) {
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-        tft.setCursor(40, 30); tft.print("HUMIDITY");
-        
+        tft.setCursor(40, 30);
+        tft.print("HUMIDITY");
+
         tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
-        tft.setCursor(16, 86); tft.print("24h MIN");
-        tft.setCursor(16, 100); tft.print("24h MAX");
+        tft.setCursor(16, 86);
+        tft.print("24h MIN");
+
+        tft.setCursor(16, 100);
+        tft.print("24h MAX");
       }
 
       // Large Prominent Humidity
       {
         String humVal = String(weather.humidity, 1) + " %";
         int humX = (128 - (humVal.length() * 12)) / 2;
+
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
         tft.setCursor(humX > 0 ? humX : 0, 54);
@@ -693,12 +865,19 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
       // 24h Bounds
       tft.setTextSize(1);
       tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
-      tft.setCursor(68, 86);  tft.print(weather.humMin24h, 1); tft.print(" %   ");
-      tft.setCursor(68, 100); tft.print(weather.humMax24h, 1); tft.print(" %   ");
 
-      // Trend (RISING / STABLE / FALLING)
+      tft.setCursor(68, 86);
+      tft.print(weather.humMin24h, 1);
+      tft.print(" %   ");
+
+      tft.setCursor(68, 100);
+      tft.print(weather.humMax24h, 1);
+      tft.print(" %   ");
+
+      // Trend
       {
         int trendX = (128 - (weather.humTrend.length() * 6)) / 2;
+
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
         tft.setCursor(trendX > 0 ? trendX : 0, 118);
         tft.print(weather.humTrend);
@@ -709,23 +888,27 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
     case 2: // PAGE 3: PRESSURE
       if (fullRedraw) {
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-        tft.setCursor(40, 30); tft.print("PRESSURE");
+        tft.setCursor(40, 30);
+        tft.print("PRESSURE");
       }
 
       // Prominent Pressure
       {
         String pressVal = String(weather.pressure, 1) + " hPa";
         int pressX = (128 - (pressVal.length() * 12)) / 2;
+
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
         tft.setCursor(pressX > 0 ? pressX : 0, 60);
         tft.print(pressVal);
       }
 
-      // Trend (RISING / STABLE / FALLING)
+      // Trend
       {
         tft.setTextSize(1);
+
         int trendX = (128 - (weather.pressTrend.length() * 6)) / 2;
+
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
         tft.setCursor(trendX > 0 ? trendX : 0, 95);
         tft.print(weather.pressTrend);
@@ -736,13 +919,15 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
     case 3: // PAGE 4: LIGHT
       if (fullRedraw) {
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-        tft.setCursor(49, 30); tft.print("LIGHT");
+        tft.setCursor(49, 30);
+        tft.print("LIGHT");
       }
 
       // Prominent Lux
       {
         String luxVal = String(weather.lux, 0) + " lx";
         int luxX = (128 - (luxVal.length() * 12)) / 2;
+
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
         tft.setCursor(luxX > 0 ? luxX : 0, 60);
@@ -753,14 +938,23 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
       {
         tft.setTextSize(1);
         tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
+
         String cond = "DAYLIGHT";
-        if (weather.lux < 10.0)       cond = "DARK / NIGHT";
-        else if (weather.lux < 300.0) cond = "DIM INDOOR";
-        else if (weather.lux < 1000.0)cond = "BRIGHT INDOOR";
-        else if (weather.lux < 10000) cond = "DAYLIGHT";
-        else                          cond = "DIRECT SUNLIGHT";
+
+        if (weather.lux < 10.0) {
+          cond = "DARK / NIGHT";
+        } else if (weather.lux < 300.0) {
+          cond = "DIM INDOOR";
+        } else if (weather.lux < 1000.0) {
+          cond = "BRIGHT INDOOR";
+        } else if (weather.lux < 10000) {
+          cond = "DAYLIGHT";
+        } else {
+          cond = "DIRECT SUNLIGHT";
+        }
 
         int condX = (128 - (cond.length() * 6)) / 2;
+
         tft.setCursor(condX > 0 ? condX : 0, 95);
         tft.print(cond);
         tft.print("   ");
@@ -770,8 +964,9 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
     case 4: // PAGE 5: RAIN POSSIBILITY
       if (fullRedraw) {
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-        tft.setCursor(16, 28); tft.print("RAIN POSSIBILITY");
-        
+        tft.setCursor(16, 28);
+        tft.print("RAIN POSSIBILITY");
+
         // Progress Bar Outer Frame
         tft.drawRect(14, 75, 100, 14, ST7735_WHITE);
       }
@@ -780,6 +975,7 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
       {
         String probVal = String(weather.rainProbability, 0) + " %";
         int probX = (128 - (probVal.length() * 12)) / 2;
+
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
         tft.setCursor(probX > 0 ? probX : 0, 50);
@@ -788,8 +984,13 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
 
       // Progress Bar Fill
       {
-        int barW = map(constrain((int)weather.rainProbability, 0, 100), 0, 100, 0, 96);
+        int barW = map(
+            constrain((int)weather.rainProbability, 0, 100),
+            0, 100, 0, 96
+        );
+
         tft.fillRect(16, 77, 96, 10, COLOR_NAVY);
+
         if (barW > 0) {
           tft.fillRect(16, 77, barW, 10, ST7735_CYAN);
         }
@@ -798,7 +999,9 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
       // Rain Status Text
       {
         tft.setTextSize(1);
+
         int statusX = (128 - (weather.rainStatus.length() * 6)) / 2;
+
         tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
         tft.setCursor(statusX > 0 ? statusX : 0, 100);
         tft.print(weather.rainStatus);
@@ -809,12 +1012,14 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
     case 5: // PAGE 6: RAIN STATUS
       if (fullRedraw) {
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-        tft.setCursor(31, 30); tft.print("RAIN STATUS");
+        tft.setCursor(31, 30);
+        tft.print("RAIN STATUS");
       }
 
-      // Large Prominent Status (RAINING / LIKELY / POSSIBLE / WATCH / DRY)
+      // Large Prominent Status
       {
         int statusX = (128 - (weather.rainStatus.length() * 12)) / 2;
+
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
         tft.setCursor(statusX > 0 ? statusX : 0, 70);
@@ -826,62 +1031,90 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
     case 6: // PAGE 7: POWER
       if (fullRedraw) {
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-        tft.setCursor(49, 30); tft.print("POWER");
+        tft.setCursor(49, 30);
+        tft.print("POWER");
       }
 
-      // Power Status (USB POWER during test mode)
+      // Existing Power Status (USB POWER during test mode)
       {
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
+
         if (weather.isUsbPower) {
           tft.setCursor(10, 68);
           tft.print("USB POWER");
         } else {
           String vStr = String(weather.batteryVoltage, 2) + " V";
           int vX = (128 - (vStr.length() * 12)) / 2;
+
           tft.setCursor(vX > 0 ? vX : 0, 68);
           tft.print(vStr);
         }
       }
+
+      // Estimated power consumption in watts
+      tft.setTextSize(1);
+      tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
+
+      tft.setCursor(8, 100);
+      tft.print("EST POWER: ");
+      tft.print(weather.estimatedPowerW, 2);
+      tft.print(" W   ");
+
+      // Accumulated estimated energy since startup
+      tft.setCursor(8, 112);
+      tft.print("ENERGY: ");
+      tft.print(weather.estimatedEnergyWh, 2);
+      tft.print(" Wh   ");
+
+      // Runtime since ESP32 startup
+      tft.setCursor(8, 124);
+      tft.print("ON TIME: ");
+      tft.print(millis() / 3600000.0, 2);
+      tft.print(" h   ");
+
       break;
 
     case 7: // PAGE 8: EXACT APPROVED V3.2 DATE & TIME PAGE
       if (fullRedraw) {
-        // Centered Header "G-WEATHER" (Text Size 1, Cyan)
+        // Centered Header "G-WEATHER"
         tft.setTextSize(1);
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
         tft.setCursor(37, 10);
         tft.print("G-WEATHER");
 
-        // Centered Subtitle "DATE & TIME" (Text Size 1, Cyan)
+        // Centered Subtitle "DATE & TIME"
         tft.setCursor(31, 30);
         tft.print("DATE & TIME");
       }
-      
-      // 1. Time (12-Hour HH:MM AM/PM, No Seconds, Text Size 2, Centered, Yellow)
+
+      // 1. Time (12-Hour HH:MM AM/PM, No Seconds)
       {
         String timeStr = getFormattedTime12HNoSec();
         int timeX = (128 - (timeStr.length() * 12)) / 2;
+
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
         tft.setCursor(timeX > 0 ? timeX : 0, 54);
         tft.print(timeStr);
       }
 
-      // 2. Date (DD MON YYYY, Text Size 1, Centered, White)
+      // 2. Date (DD MON YYYY)
       {
         String dateStr = getFormattedDateDDMONYYYY();
         int dateX = (128 - (dateStr.length() * 6)) / 2;
+
         tft.setTextSize(1);
         tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
         tft.setCursor(dateX > 0 ? dateX : 0, 86);
         tft.print(dateStr);
       }
 
-      // 3. Day of Week (Uppercase, Text Size 2, Centered, Yellow)
+      // 3. Day of Week (Uppercase)
       {
         String dayStr = getDayOfWeekNameUpper();
         int dayX = (128 - (dayStr.length() * 12)) / 2;
+
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
         tft.setCursor(dayX > 0 ? dayX : 0, 110);
@@ -896,36 +1129,81 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
 // ============================================================================
 String getFormattedTime12HNoSec() {
   if (!rtcAvailable) return "07:35 PM";
+
   int hour12 = nowRTC.hour() % 12;
-  if (hour12 == 0) hour12 = 12;
+
+  if (hour12 == 0) {
+    hour12 = 12;
+  }
+
   const char* ampm = nowRTC.hour() >= 12 ? "PM" : "AM";
+
   char buf[12];
-  snprintf(buf, sizeof(buf), "%02d:%02d %s", hour12, nowRTC.minute(), ampm);
+
+  snprintf(
+    buf,
+    sizeof(buf),
+    "%02d:%02d %s",
+    hour12,
+    nowRTC.minute(),
+    ampm
+  );
+
   return String(buf);
 }
 
 String getFormattedDateDDMONYYYY() {
   if (!rtcAvailable) return "08 OCT 2026";
+
   int m = nowRTC.month();
-  if (m < 1 || m > 12) m = 1;
+
+  if (m < 1 || m > 12) {
+    m = 1;
+  }
+
   char buf[15];
-  snprintf(buf, sizeof(buf), "%02d %s %04d", nowRTC.day(), monthNamesUpper[m - 1], nowRTC.year());
+
+  snprintf(
+    buf,
+    sizeof(buf),
+    "%02d %s %04d",
+    nowRTC.day(),
+    monthNamesUpper[m - 1],
+    nowRTC.year()
+  );
+
   return String(buf);
 }
 
 String getDayOfWeekNameUpper() {
   if (!rtcAvailable) return "THURSDAY";
+
   int d = nowRTC.dayOfTheWeek();
-  if (d < 0 || d > 6) d = 0;
+
+  if (d < 0 || d > 6) {
+    d = 0;
+  }
+
   return String(daysOfWeekUpper[d]);
 }
 
 String getFormattedISO8601Timestamp() {
   if (!rtcAvailable) return "2026-01-01T00:00:00";
+
   char buf[25];
-  snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d",
-           nowRTC.year(), nowRTC.month(), nowRTC.day(),
-           nowRTC.hour(), nowRTC.minute(), nowRTC.second());
+
+  snprintf(
+    buf,
+    sizeof(buf),
+    "%04d-%02d-%02dT%02d:%02d:%02d",
+    nowRTC.year(),
+    nowRTC.month(),
+    nowRTC.day(),
+    nowRTC.hour(),
+    nowRTC.minute(),
+    nowRTC.second()
+  );
+
   return String(buf);
 }
 
@@ -979,6 +1257,7 @@ void handleTelemetryUpload() {
   if (httpResponseCode > 0) {
     Serial.print("[Telemetry] HTTP ");
     Serial.println(httpResponseCode);
+
     if (httpResponseCode == 201 || httpResponseCode == 200) {
       Serial.println("[Telemetry] Upload successful");
     } else {
