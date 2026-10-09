@@ -1,9 +1,10 @@
 import mongoose from 'mongoose';
+import dns from 'dns';
 
 /**
  * Connects to MongoDB Atlas / Local MongoDB using Mongoose
- * Uses MONGODB_URI environment variable cleanly without exposing credentials
- * Handles connection reuse and fast-timeout in serverless environments (e.g. Vercel)
+ * Uses MONGODB_URI environment variable cleanly
+ * Handles connection reuse, local DNS fallback, and fast-timeout for Vercel
  */
 const connectDB = async () => {
   if (mongoose.connection.readyState >= 1) {
@@ -18,10 +19,24 @@ const connectDB = async () => {
       return;
     }
 
-    const conn = await mongoose.connect(connStr, {
-      serverSelectionTimeoutMS: 3000 // Fast 3-second timeout for serverless
-    });
-    console.log(`[Database] MongoDB connected successfully to host: ${conn.connection.host}`);
+    try {
+      const conn = await mongoose.connect(connStr, {
+        serverSelectionTimeoutMS: 5000
+      });
+      console.log(`[Database] MongoDB Atlas connected successfully to host: ${conn.connection.host}`);
+    } catch (firstErr) {
+      // If local ISP DNS blocks SRV record resolution, set Google/Cloudflare public DNS and retry
+      if (firstErr.message.includes('querySrv')) {
+        console.log('[Database Notice] Retrying MongoDB Atlas SRV query using public DNS...');
+        dns.setServers(['8.8.8.8', '1.1.1.1']);
+        const conn = await mongoose.connect(connStr, {
+          serverSelectionTimeoutMS: 5000
+        });
+        console.log(`[Database] MongoDB Atlas connected successfully via fallback DNS to host: ${conn.connection.host}`);
+      } else {
+        throw firstErr;
+      }
+    }
   } catch (error) {
     console.error(`[Database Error] Connection failed: ${error.message} — falling back to in-memory mode`);
   }
