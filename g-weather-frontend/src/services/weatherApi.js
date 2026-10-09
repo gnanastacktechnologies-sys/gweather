@@ -1,4 +1,34 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:17205/api';
+/**
+ * Dynamically resolve backend API base URL
+ * Prevents mobile devices from failing when trying to connect to 'localhost'
+ */
+const getApiBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+
+  // If envUrl is explicitly provided and does not contain localhost, use it directly
+  if (envUrl && !envUrl.includes('localhost')) {
+    return envUrl;
+  }
+
+  // If running in browser and accessed via IP (e.g., 10.45.119.232 or mobile LAN)
+  if (typeof window !== 'undefined' && window.location) {
+    const hostname = window.location.hostname;
+
+    // If accessed via non-localhost IP on local Wi-Fi / Hotspot
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      // If hosted on Vercel or cloud domain
+      if (hostname.includes('vercel.app') || hostname.includes('github.io')) {
+        return envUrl || 'https://g-weather-backend.vercel.app/api';
+      }
+      // If accessed via LAN IP on local Wi-Fi
+      return `http://${hostname}:17205/api`;
+    }
+  }
+
+  return envUrl || 'http://localhost:17205/api';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 /**
  * Check backend API health status
