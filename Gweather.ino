@@ -446,7 +446,7 @@ void initPeripherals() {
         logFile.println(
           "Timestamp,Temp_C,Hum_Pct,Press_hPa,Lux,UV_Index,Rain_Raw,Rain_Filt,"
           "Rain_Prob_Pct,Rain_Status,Temp_Trend,Hum_Trend,Press_Trend,"
-          "Temp_Min24h,Temp_Max24h,Hum_Min24h,Hum_Max24h,WiFi_Status"
+          "Temp_Min24h,Temp_Max24h,Hum_Min24h,Hum_Max24h,WiFi_Status,Battery_V"
         );
 
         logFile.close();
@@ -807,9 +807,12 @@ void logToSDCard() {
     logFile.print(weather.humMax24h, 1);
     logFile.print(",");
 
-    logFile.println(
+    logFile.print(
         WiFi.status() == WL_CONNECTED ? "Connected" : "Disconnected"
     );
+    logFile.print(",");
+
+    logFile.println(weather.batteryVoltage, 2);
 
     logFile.close();
     Serial.println("[SD Log] Data log entry written to /weather_log.csv");
@@ -1477,6 +1480,16 @@ void syncOfflineSDRecords() {
       batchJson += "\"uvIndex\":" + uv + ",";
       batchJson += "\"rainProbability\":" + prob + ",";
       batchJson += "\"rainStatus\":\"" + rStat + "\"";
+
+      int lastComma = line.lastIndexOf(',');
+      if (lastComma > c10) {
+        String volt = line.substring(lastComma + 1);
+        volt.trim();
+        float vVal = volt.toFloat();
+        if (vVal > 0.05) {
+          batchJson += ",\"batteryVoltage\":" + String(vVal, 2) + ",\"isUsbPower\":false";
+        }
+      }
       batchJson += "}";
 
       recordCount++;
