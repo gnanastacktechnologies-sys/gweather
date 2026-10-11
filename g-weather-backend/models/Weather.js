@@ -24,6 +24,10 @@ const weatherSchema = new mongoose.Schema(
       type: Number,
       default: 0
     },
+    uvIndex: {
+      type: Number,
+      default: 0
+    },
     rainProbability: {
       type: Number,
       default: 0

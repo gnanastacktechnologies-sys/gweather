@@ -60,6 +60,7 @@ export default function HistoryCard({ historyData, summary, selectedFilter, onFi
                 <th>Humidity (%)</th>
                 <th>Pressure (hPa)</th>
                 <th>Light (lx)</th>
+                <th>UV (UVI)</th>
                 <th>Rain Chance</th>
                 <th>Status</th>
                 <th>Supply</th>
@@ -68,7 +69,7 @@ export default function HistoryCard({ historyData, summary, selectedFilter, onFi
             <tbody>
               {historyData.length === 0 ? (
                 <tr>
-                  <td colSpan="9" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                  <td colSpan="10" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
                     No historical telemetry records found.
                   </td>
                 </tr>
@@ -81,6 +82,7 @@ export default function HistoryCard({ historyData, summary, selectedFilter, onFi
                     <td>{row.humidity}%</td>
                     <td>{row.pressure} hPa</td>
                     <td>{row.light} lx</td>
+                    <td>{row.uvIndex !== undefined ? row.uvIndex : 0}</td>
                     <td>{row.rainProbability}%</td>
                     <td>
                       <span className={`table-status-tag tag-${(row.rainStatus || 'dry').toLowerCase()}`}>

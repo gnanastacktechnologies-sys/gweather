@@ -72,6 +72,7 @@ const char* DEVICE_ID  = "GWEATHER-001";
 
 #define RAIN_PIN      34
 #define BATTERY_PIN   35
+#define UV_PIN        33
 
 #define TFT_CS        5
 #define TFT_DC        17
@@ -116,6 +117,9 @@ struct WeatherData {
   float pressure = 0.0;
   float altitude = 0.0;
   float lux = 0.0;
+  float uvIndex = 0.0;
+  int uvMilliVolts = 0;
+  String uvLevel = "LOW";
 
   int rainRaw = 4095;
   float rainFiltered = 4095.0;
@@ -248,6 +252,10 @@ void setup() {
 
   // Explicitly initialize shared hardware SPI bus for TFT and SD Card
   SPI.begin(TFT_SCK, SD_MISO, TFT_MOSI, -1);
+
+  // Configure UV Sensor Pin (ADC1_CH5)
+  analogReadResolution(12);
+  pinMode(UV_PIN, INPUT);
 
   // Initialize Wire (I2C)
   Wire.begin(I2C_SDA, I2C_SCL);
@@ -435,7 +443,7 @@ void initPeripherals() {
 
       if (logFile) {
         logFile.println(
-          "Timestamp,Temp_C,Hum_Pct,Press_hPa,Lux,Rain_Raw,Rain_Filt,"
+          "Timestamp,Temp_C,Hum_Pct,Press_hPa,Lux,UV_Index,Rain_Raw,Rain_Filt,"
           "Rain_Prob_Pct,Rain_Status,Temp_Trend,Hum_Trend,Press_Trend,"
           "Temp_Min24h,Temp_Max24h,Hum_Min24h,Hum_Max24h,WiFi_Status"
         );
@@ -535,6 +543,24 @@ void readSensors() {
     }
   }
 
+  // Read GUVA-S12SD UV Sensor (Analog GPIO33 on ADC1)
+  int uvMV = analogReadMilliVolts(UV_PIN);
+  weather.uvMilliVolts = uvMV;
+  // GUVA-S12SD: 100 mV approx 1 UV Index
+  weather.uvIndex = constrain((float)uvMV / 100.0f, 0.0f, 15.0f);
+
+  if (weather.uvIndex < 3.0f) {
+    weather.uvLevel = "LOW";
+  } else if (weather.uvIndex < 6.0f) {
+    weather.uvLevel = "MODERATE";
+  } else if (weather.uvIndex < 8.0f) {
+    weather.uvLevel = "HIGH";
+  } else if (weather.uvIndex < 11.0f) {
+    weather.uvLevel = "VERY HIGH";
+  } else {
+    weather.uvLevel = "EXTREME";
+  }
+
   // Read Rain Sensor (Analog GPIO34)
   int rawRain = analogRead(RAIN_PIN);
   weather.rainRaw = rawRain;
@@ -554,62 +580,73 @@ void readSensors() {
 }
 
 // ============================================================================
-// V2 INTELLIGENCE ENGINE
+// INTELLIGENT METEOROLOGICAL ENGINE (MULTI-SENSOR FUSION)
 // ============================================================================
 void applyV2Intelligence() {
-  // 1. Rain Wetness Percentage Calculation (4095 = Dry, <=1000 = Saturated)
-  float wetnessPct =
-      map(constrain((int)weather.rainFiltered, 1000, 4095), 4095, 1000, 0, 100);
+  // 1. Magnus-Tetens Dew Point and Spread Calculation
+  float alpha = ((17.27f * weather.temperature) / (237.7f + weather.temperature)) + log(weather.humidity / 100.0f);
+  float dewPoint = (237.7f * alpha) / (17.27f - alpha);
+  float dewSpread = weather.temperature - dewPoint;
 
-  // 2. Barometric & Atmospheric Rain Probability Calculation
-  float prob = 0.0;
+  // 2. Physical Rain Wetness on Sensor Pad (4095 = Dry, <=1000 = Saturated)
+  float wetnessPct = map(constrain((int)weather.rainFiltered, 1000, 4095), 4095, 1000, 0, 100);
+  bool physicalRainDetected = (wetnessPct > 20.0f);
 
-  // Rain sensor wetness contribution
-  if (wetnessPct > 5.0) {
-    prob += wetnessPct * 0.8;
+  // 3. Multi-Sensor Rain Probability Fusion
+  float prob = 0.0f;
+
+  if (physicalRainDetected) {
+    // Rain droplets physically detected on sensor plate
+    prob = 80.0f + (wetnessPct * 0.2f);
+  } else {
+    // Sensor plate is completely dry -> Forecast atmospheric trend
+    // A. Barometric Drop Rate (only if pressure is actively falling)
+    if (weather.pressTrend == "FALLING") {
+      prob += 35.0f;
+    }
+
+    // B. Atmospheric moisture saturation (dew point spread small)
+    if (dewSpread < 2.5f && weather.humidity > 70.0f) {
+      prob += (75.0f - dewSpread * 20.0f);
+    }
+
+    // C. Humidity trend
+    if (weather.humTrend == "RISING") {
+      prob += 10.0f;
+    }
+
+    // D. Temperature cooling trend during high humidity
+    if (weather.tempTrend == "FALLING" && weather.humidity > 75.0f) {
+      prob += 5.0f;
+    }
+
+    // E. Clear Day Suppression: Bright sun + UV penetrating -> rain probability 0%
+    if (weather.lux > 15000.0f || weather.uvIndex >= 3.0f) {
+      prob = 0.0f;
+    }
+
+    // F. Clear Night Suppression: Stable/Rising pressure + dry sensor + safe dew spread
+    if (weather.pressTrend != "FALLING" && dewSpread > 3.0f) {
+      prob = min(prob, 10.0f);
+    }
   }
 
-  // Humidity contribution
-  if (weather.humidity > 60.0) {
-    prob += (weather.humidity - 60.0) * 1.0;
-  }
+  weather.rainProbability = constrain(prob, 0.0f, 100.0f);
 
-  // Pressure contribution
-  if (weather.pressure > 0.0 && weather.pressure < 1013.25) {
-    prob += (1013.25 - weather.pressure) * 1.5;
-  }
-
-  // Pressure trend contribution
-  if (weather.pressTrend == "FALLING") {
-    prob += 15.0;
-  }
-
-  // Humidity trend contribution
-  if (weather.humTrend == "RISING") {
-    prob += 10.0;
-  }
-
-  // Temperature trend contribution
-  if (weather.tempTrend == "FALLING") {
-    prob += 5.0;
-  }
-
-  weather.rainProbability = constrain(prob, 0.0, 100.0);
-
-  // 3. Approved V2 Rain Status Classifications
-  if (wetnessPct > 20.0) {
+  // 4. Strict Rain Status: Show "RAINING" ONLY if water drops physically hit plate
+  if (physicalRainDetected) {
     weather.rainStatus = "RAINING";
-  } else if (weather.rainProbability >= 70.0) {
+  } else if (weather.rainProbability >= 65.0f) {
     weather.rainStatus = "LIKELY";
-  } else if (weather.rainProbability >= 45.0) {
+  } else if (weather.rainProbability >= 40.0f) {
     weather.rainStatus = "POSSIBLE";
-  } else if (weather.rainProbability >= 25.0) {
+  } else if (weather.rainProbability >= 20.0f) {
     weather.rainStatus = "WATCH";
   } else {
     weather.rainStatus = "DRY";
   }
 
-  // 4. Update 24-Hour Min / Max Tracking
+  // 5. Update 24-Hour Min / Max Tracking
   update24HourStats();
 }
 
@@ -731,6 +768,9 @@ void logToSDCard() {
     logFile.print(",");
 
     logFile.print(weather.lux, 1);
+    logFile.print(",");
+
+    logFile.print(weather.uvIndex, 1);
     logFile.print(",");
 
     logFile.print(weather.rainRaw);
@@ -938,11 +978,11 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
       }
       break;
 
-    case 3: // PAGE 4: LIGHT
+    case 3: // PAGE 4: SOLAR LIGHT & UV INDEX
       if (fullRedraw) {
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-        tft.setCursor(49, 30);
-        tft.print("LIGHT");
+        tft.setCursor(31, 28);
+        tft.print("SOLAR & UV");
       }
 
       // Prominent Lux
@@ -952,7 +992,7 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
 
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
-        tft.setCursor(luxX > 0 ? luxX : 0, 60);
+        tft.setCursor(luxX > 0 ? luxX : 0, 50);
         tft.print(luxVal);
       }
 
@@ -977,8 +1017,19 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
 
         int condX = (128 - (cond.length() * 6)) / 2;
 
-        tft.setCursor(condX > 0 ? condX : 0, 95);
+        tft.setCursor(condX > 0 ? condX : 0, 78);
         tft.print(cond);
+        tft.print("   ");
+      }
+
+      // UV Index & Risk Level Display
+      {
+        tft.setTextSize(1);
+        tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
+        String uvStr = "UV: " + String(weather.uvIndex, 1) + " (" + weather.uvLevel + ")";
+        int uvX = (128 - (uvStr.length() * 6)) / 2;
+        tft.setCursor(uvX > 0 ? uvX : 0, 102);
+        tft.print(uvStr);
         tft.print("   ");
       }
       break;
@@ -1261,6 +1312,7 @@ void handleTelemetryUpload() {
   jsonPayload += "\"humidity\":" + String(weather.humidity, 2) + ",";
   jsonPayload += "\"pressure\":" + String(weather.pressure, 2) + ",";
   jsonPayload += "\"light\":" + String(weather.lux, 1) + ",";
+  jsonPayload += "\"uvIndex\":" + String(weather.uvIndex, 1) + ",";
   jsonPayload += "\"rainProbability\":" + String(weather.rainProbability, 1) + ",";
   jsonPayload += "\"rainStatus\":\"" + weather.rainStatus + "\",";
   jsonPayload += "\"pressureTrend\":\"" + weather.pressTrend + "\",";

@@ -164,6 +164,10 @@ export default function App() {
                   <span className="sub-val">{weatherData?.light !== undefined ? `${weatherData.light} lx` : '--'}</span>
                 </div>
                 <div className="sub-stat-box">
+                  <span className="sub-lbl">UV Index</span>
+                  <span className="sub-val text-amber">{weatherData?.uvIndex !== undefined ? `${weatherData.uvIndex} UVI` : '0 UVI'}</span>
+                </div>
+                <div className="sub-stat-box">
                   <span className="sub-lbl">Rain Chance</span>
                   <span className="sub-val">{weatherData?.rainProbability !== undefined ? `${weatherData.rainProbability}%` : '--'}</span>
                 </div>
@@ -191,6 +195,19 @@ export default function App() {
                 value={weatherData?.light}
                 unit="lx"
                 subtitle="BH1750 Light Intensity"
+              />
+
+              <WeatherCard
+                title="UV Index"
+                value={weatherData?.uvIndex !== undefined ? weatherData.uvIndex : 0}
+                unit="UVI"
+                trend={
+                  (weatherData?.uvIndex || 0) < 3 ? 'LOW' :
+                  (weatherData?.uvIndex || 0) < 6 ? 'MODERATE' :
+                  (weatherData?.uvIndex || 0) < 8 ? 'HIGH' :
+                  (weatherData?.uvIndex || 0) < 11 ? 'VERY HIGH' : 'EXTREME'
+                }
+                subtitle="GUVA-S12SD Solar Radiation"
               />
             </div>
 

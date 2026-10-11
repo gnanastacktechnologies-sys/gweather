@@ -326,7 +326,13 @@ body {
 
 @media (min-width: 640px) {
   .hero-sub-stats {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .hero-sub-stats {
+    grid-template-columns: repeat(5, 1fr);
   }
 }
 
@@ -368,7 +374,7 @@ body {
 
 @media (min-width: 1024px) {
   .metrics-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 
