@@ -591,13 +591,21 @@ export const postWeatherBatch = async (req, res, next) => {
 
     if (mongoose.connection.readyState === 1) {
       const timestamps = validRecords.map(r => r.timestamp);
+      const minTs = new Date(Math.min(...timestamps.map(t => t.getTime())) - 60000);
+      const maxTs = new Date(Math.max(...timestamps.map(t => t.getTime())) + 60000);
+
       const existing = await Weather.find({
         deviceId: { $in: validRecords.map(r => r.deviceId) },
-        timestamp: { $in: timestamps }
+        timestamp: { $gte: minTs, $lte: maxTs }
       }).select('timestamp deviceId').lean();
 
-      const existingSet = new Set(existing.map(e => `${e.deviceId}_${new Date(e.timestamp).getTime()}`));
-      const toInsert = validRecords.filter(r => !existingSet.has(`${r.deviceId}_${r.timestamp.getTime()}`));
+      const toInsert = validRecords.filter(r => {
+        const rTime = r.timestamp.getTime();
+        const isDuplicate = existing.some(e => {
+          return e.deviceId === r.deviceId && Math.abs(new Date(e.timestamp).getTime() - rTime) < 45000;
+        });
+        return !isDuplicate;
+      });
 
       if (toInsert.length > 0) {
         const result = await Weather.insertMany(toInsert, { ordered: false });

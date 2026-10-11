@@ -18,6 +18,17 @@ export default function HistoryCard({ historyData, summary, selectedFilter, onFi
     }
   };
 
+  // Deduplicate entries that share the exact same minute for the same device
+  const uniqueHistory = [];
+  const seenMinutes = new Set();
+  for (const row of historyData) {
+    const timeKey = `${row.deviceId || 'dev'}_${formatTime(row.timestamp || row.receivedAt)}`;
+    if (!seenMinutes.has(timeKey)) {
+      seenMinutes.add(timeKey);
+      uniqueHistory.push(row);
+    }
+  }
+
   return (
     <div className="card history-card">
       <div className="card-header">
@@ -72,14 +83,14 @@ export default function HistoryCard({ historyData, summary, selectedFilter, onFi
               </tr>
             </thead>
             <tbody>
-              {historyData.length === 0 ? (
+              {uniqueHistory.length === 0 ? (
                 <tr>
                   <td colSpan="10" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
                     No historical telemetry records found.
                   </td>
                 </tr>
               ) : (
-                historyData.map((row, idx) => (
+                uniqueHistory.map((row, idx) => (
                   <tr key={row._id || idx}>
                     <td>{formatTime(row.timestamp || row.receivedAt)}</td>
                     <td>{row.deviceId || 'GWEATHER-001'}</td>
