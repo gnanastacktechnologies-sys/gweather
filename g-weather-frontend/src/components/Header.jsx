@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import StatusBadge from './StatusBadge';
 import { ClockIcon, BoltIcon, SdCardIcon } from './Icons';
 
-export default function Header({ isOnline, deviceId, onOpenSdSync }) {
+export default function Header({ isOnline, deviceId, onOpenSdSync, dayPhase, dayPhaseIcon }) {
   const [timeStr, setTimeStr] = useState('');
 
   useEffect(() => {
@@ -44,6 +44,13 @@ export default function Header({ isOnline, deviceId, onOpenSdSync }) {
           <ClockIcon className="chip-svg" />
           <span className="clock-time">{timeStr}</span>
         </div>
+
+        {dayPhase && (
+          <div className="phase-chip" title={`Current Day Phase: ${dayPhase}`}>
+            <span className="phase-emoji">{dayPhaseIcon || '🌙'}</span>
+            <span className="phase-name">{dayPhase}</span>
+          </div>
+        )}
 
         {deviceId && (
           <div className="device-chip">

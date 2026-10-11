@@ -315,6 +315,71 @@ body {
   align-self: flex-start;
 }
 
+.hero-atmosphere-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.hero-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-card);
+  padding: 4px 12px;
+  border-radius: 9999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.hero-tag-chip.chip-phase {
+  border-color: rgba(0, 242, 254, 0.35);
+  background: rgba(0, 242, 254, 0.08);
+  color: var(--cyan);
+}
+
+.hero-tag-chip.chip-sky {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+  color: #fbbf24;
+}
+
+.hero-badges-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+@media (min-width: 640px) {
+  .hero-badges-col {
+    align-items: flex-end;
+  }
+}
+
+.hero-sky-subtext {
+  font-size: 0.74rem;
+  color: var(--text-sub);
+  font-weight: 600;
+}
+
+.phase-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-inset);
+  border: 1px solid rgba(0, 242, 254, 0.25);
+  padding: 6px 14px;
+  border-radius: 9999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--cyan);
+}
+
 .hero-sub-stats {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

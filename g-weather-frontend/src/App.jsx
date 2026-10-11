@@ -106,15 +106,81 @@ export default function App() {
     }
   };
 
-  const getRainIcon = (status) => {
-    switch (status) {
-      case 'RAINING': return '🌧️';
-      case 'LIKELY': return '🌦️';
-      case 'POSSIBLE': return '⛅';
-      case 'WATCH': return '🌤️';
-      default: return '☀️';
+  // Smart Multi-Sensor Day Phase & Sky Condition Detection
+  const getWeatherAtmosphere = (data) => {
+    if (!data) return { phase: 'Night', phaseIcon: '🌙', sky: 'Clear Night', skyIcon: '🌙', description: 'Nighttime darkness (0 lx)', lightTag: 'DARK / NIGHT' };
+
+    const lux = data.light !== undefined ? Number(data.light) : 0;
+    const humidity = data.humidity !== undefined ? Number(data.humidity) : 0;
+    const rainStatus = (data.rainStatus || 'DRY').toUpperCase();
+
+    // Determine current hour in local time
+    let hour = new Date().getHours();
+    if (data.timestamp || data.receivedAt) {
+      const d = new Date(data.timestamp || data.receivedAt);
+      if (!isNaN(d.getTime())) {
+        hour = d.getHours();
+      }
     }
+
+    const isNight = lux < 10 || hour >= 20 || hour < 6;
+    let phase = 'Night';
+    let phaseIcon = '🌙';
+
+    if (hour >= 6 && hour < 12) {
+      phase = 'Morning';
+      phaseIcon = '🌅';
+    } else if (hour >= 12 && hour < 17) {
+      phase = 'Afternoon';
+      phaseIcon = '☀️';
+    } else if (hour >= 17 && hour < 20) {
+      phase = 'Evening';
+      phaseIcon = '🌇';
+    }
+
+    // Light classification tag
+    let lightTag = 'DAYLIGHT';
+    if (lux < 10) lightTag = 'DARK / NIGHT';
+    else if (lux < 300) lightTag = 'DIM SHADE';
+    else if (lux < 3000) lightTag = 'OVERCAST CLOUDS';
+    else if (lux < 12000) lightTag = 'DAYLIGHT';
+    else lightTag = 'DIRECT SUNLIGHT';
+
+    if (isNight) {
+      if (rainStatus === 'RAINING') {
+        return { phase, phaseIcon, sky: 'Night Rain', skyIcon: '🌧️', description: 'Active rainfall during night', lightTag };
+      }
+      if (rainStatus === 'LIKELY') {
+        return { phase, phaseIcon, sky: 'Rain Likely', skyIcon: '🌧️', description: 'High probability of night rain', lightTag };
+      }
+      if (humidity >= 80 || rainStatus === 'POSSIBLE') {
+        return { phase, phaseIcon, sky: 'Misty / Dew Night', skyIcon: '🌫️', description: `Night moisture (${humidity}% humidity • dew condensation)`, lightTag };
+      }
+      return { phase, phaseIcon, sky: 'Clear Night', skyIcon: '🌙', description: 'Clear night sky • safe conditions', lightTag };
+    }
+
+    // Daytime Sky Detection
+    if (rainStatus === 'RAINING') {
+      return { phase, phaseIcon, sky: 'Raining', skyIcon: '🌧️', description: 'Precipitation actively falling', lightTag };
+    }
+    if (rainStatus === 'LIKELY') {
+      return { phase, phaseIcon, sky: 'Storm Approaching', skyIcon: '🌦️', description: 'Storm clouds & falling pressure', lightTag };
+    }
+
+    // Cloud detection using Lux and Humidity during daytime
+    if (lux < 3500 && humidity > 75) {
+      return { phase, phaseIcon, sky: 'Overcast & Cloudy', skyIcon: '☁️', description: 'Heavy clouds blocking solar radiation (< 3,500 lx)', lightTag: 'OVERCAST CLOUDS' };
+    }
+    if (lux < 8500 || rainStatus === 'POSSIBLE' || humidity > 70) {
+      return { phase, phaseIcon, sky: 'Partly Cloudy', skyIcon: '⛅', description: 'Scattered clouds filtering sunlight', lightTag: 'PARTLY CLOUDY' };
+    }
+    if (lux < 16000) {
+      return { phase, phaseIcon, sky: 'Filtered Sunlight', skyIcon: '🌤️', description: 'Mild diffuse solar daylight', lightTag: 'DAYLIGHT' };
+    }
+    return { phase, phaseIcon, sky: 'Clear & Sunny', skyIcon: '☀️', description: 'Direct clear sunlight (> 16,000 lx)', lightTag: 'DIRECT SUNLIGHT' };
   };
+
+  const atmosphere = getWeatherAtmosphere(weatherData);
 
   return (
     <div className="app-container">
@@ -122,6 +188,8 @@ export default function App() {
         isOnline={isOnline}
         deviceId={weatherData?.deviceId}
         onOpenSdSync={() => setIsSdSyncOpen(true)}
+        dayPhase={atmosphere.phase}
+        dayPhaseIcon={atmosphere.phaseIcon}
       />
 
       <main className="dashboard-content">
@@ -148,11 +216,24 @@ export default function App() {
                     <span className="hero-temp-val">{weatherData?.temperature !== undefined ? weatherData.temperature : '--'}</span>
                     <span className="hero-temp-unit">°C</span>
                   </div>
+                  <div className="hero-atmosphere-tags">
+                    <span className="hero-tag-chip chip-phase">
+                      <span>{atmosphere.phaseIcon}</span>
+                      <span>{atmosphere.phase}</span>
+                    </span>
+                    <span className="hero-tag-chip chip-sky">
+                      <span>{atmosphere.skyIcon}</span>
+                      <span>{atmosphere.sky}</span>
+                    </span>
+                  </div>
                 </div>
 
-                <div className={`hero-status-pill ${getRainStatusClass(weatherData?.rainStatus)}`}>
-                  <span>{getRainIcon(weatherData?.rainStatus)}</span>
-                  <span>{weatherData?.rainStatus || 'DRY'}</span>
+                <div className="hero-badges-col">
+                  <div className={`hero-status-pill ${getRainStatusClass(weatherData?.rainStatus)}`}>
+                    <span>{atmosphere.skyIcon}</span>
+                    <span>{weatherData?.rainStatus || 'DRY'}</span>
+                  </div>
+                  <div className="hero-sky-subtext">{atmosphere.description}</div>
                 </div>
               </div>
 
@@ -200,6 +281,7 @@ export default function App() {
                 title="Ambient Light"
                 value={weatherData?.light}
                 unit="lx"
+                trend={atmosphere.lightTag}
                 subtitle="BH1750 Light Intensity"
               />
 
