@@ -7,13 +7,11 @@ export default function HistoryCard({ historyData, summary, selectedFilter, onFi
     try {
       const d = new Date(ts);
       if (isNaN(d.getTime())) return String(ts);
-      return d.toLocaleString('en-US', {
-        timeZone: 'UTC',
+      return d.toLocaleString([], {
         month: 'short',
         day: 'numeric',
         hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
+        minute: '2-digit'
       });
     } catch (e) {
       return String(ts);
