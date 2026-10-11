@@ -14,6 +14,22 @@ let stationState = {
   sessionHistory: []
 };
 
+// Helper to parse station timestamps, ensuring local IST (+05:30) is preserved if no offset provided
+const parseTimestampIST = (raw) => {
+  if (!raw) return new Date();
+  if (raw instanceof Date) return raw;
+  let str = String(raw).trim();
+  // If ISO format without timezone offset, e.g. '2026-10-11T22:21:07'
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?$/.test(str)) {
+    str += '+05:30';
+  } else if (/^\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{2}(\s*(AM|PM))?$/i.test(str)) {
+    // SD format like '11 OCT 2026 09:56 PM'
+    str += ' GMT+0530';
+  }
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? new Date() : d;
+};
+
 // Log activity event
 const addActivityLog = (type, title, description, details = {}) => {
   const logEntry = {
@@ -88,15 +104,8 @@ export const postWeatherData = async (req, res, next) => {
       });
     }
 
-    // Parse timestamp safely
-    let parsedTimestamp = new Date();
-    if (timestamp) {
-      const ts = new Date(timestamp);
-      if (!isNaN(ts.getTime())) {
-        parsedTimestamp = ts;
-      }
-    }
-
+    // Parse timestamp safely using IST helper
+    const parsedTimestamp = parseTimestampIST(timestamp);
     const now = new Date();
     
     // Station Connection & Session Tracking
@@ -547,13 +556,7 @@ export const postWeatherBatch = async (req, res, next) => {
         continue;
       }
 
-      let parsedTimestamp = now;
-      if (timestamp) {
-        const ts = new Date(timestamp);
-        if (!isNaN(ts.getTime())) {
-          parsedTimestamp = ts;
-        }
-      }
+      const parsedTimestamp = parseTimestampIST(timestamp);
 
       validRecords.push({
         deviceId: deviceId || "GWEATHER-001",

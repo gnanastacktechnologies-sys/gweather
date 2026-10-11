@@ -1265,14 +1265,14 @@ String getDayOfWeekNameUpper() {
 }
 
 String getFormattedISO8601Timestamp() {
-  if (!rtcAvailable) return "2026-01-01T00:00:00";
+  if (!rtcAvailable) return "2026-01-01T00:00:00+05:30";
 
-  char buf[25];
+  char buf[32];
 
   snprintf(
     buf,
     sizeof(buf),
-    "%04d-%02d-%02dT%02d:%02d:%02d",
+    "%04d-%02d-%02dT%02d:%02d:%02d+05:30",
     nowRTC.year(),
     nowRTC.month(),
     nowRTC.day(),
