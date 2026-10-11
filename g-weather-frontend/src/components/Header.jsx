@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import StatusBadge from './StatusBadge';
-import { ClockIcon, BoltIcon } from './Icons';
+import { ClockIcon, BoltIcon, SdCardIcon } from './Icons';
 
-export default function Header({ isOnline, deviceId }) {
+export default function Header({ isOnline, deviceId, onOpenSdSync }) {
   const [timeStr, setTimeStr] = useState('');
 
   useEffect(() => {
@@ -31,6 +31,15 @@ export default function Header({ isOnline, deviceId }) {
       </div>
 
       <div className="header-actions">
+        <button
+          className="sd-sync-btn"
+          onClick={onOpenSdSync}
+          title="Upload or sync weather_log.csv from MicroSD Card"
+        >
+          <SdCardIcon className="chip-svg text-cyan" />
+          <span>SD SYNC</span>
+        </button>
+
         <div className="clock-chip" title="System Local Time">
           <ClockIcon className="chip-svg" />
           <span className="clock-time">{timeStr}</span>

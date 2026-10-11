@@ -5,7 +5,8 @@ import {
   getLatestWeather,
   getWeatherHistory,
   getStationActivity,
-  getMonthlyCalendar
+  getMonthlyCalendar,
+  postWeatherBatch
 } from '../controllers/weatherController.js';
 
 const router = express.Router();
@@ -15,6 +16,9 @@ router.get('/health', getHealth);
 
 // POST /api/weather — Ingest telemetry from ESP32 or client
 router.post('/weather', postWeatherData);
+
+// POST /api/weather/batch — Ingest multiple offline telemetry records from SD card or CSV
+router.post('/weather/batch', postWeatherBatch);
 
 // GET /api/weather/history — Retrieve historical telemetry & daily summary
 router.get('/weather/history', getWeatherHistory);

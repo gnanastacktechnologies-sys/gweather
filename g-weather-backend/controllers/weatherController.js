@@ -493,3 +493,132 @@ export const getMonthlyCalendar = async (req, res) => {
     });
   }
 };
+
+/**
+ * POST /api/weather/batch
+ * Ingest multiple offline telemetry records from SD card or CSV
+ */
+export const postWeatherBatch = async (req, res, next) => {
+  try {
+    const rawRecords = Array.isArray(req.body) ? req.body : req.body?.records;
+
+    if (!rawRecords || !Array.isArray(rawRecords) || rawRecords.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Validation Error: 'records' must be a non-empty array."
+      });
+    }
+
+    const now = new Date();
+    const validRecords = [];
+
+    for (const item of rawRecords) {
+      const {
+        deviceId,
+        temperature,
+        humidity,
+        pressure,
+        light,
+        uvIndex,
+        rainProbability,
+        rainStatus,
+        pressureTrend,
+        temperatureTrend,
+        humidityTrend,
+        timestamp,
+        batteryVoltage,
+        isUsbPower,
+        estimatedPowerW,
+        estimatedEnergyWh,
+        uptimeHours
+      } = item;
+
+      if (
+        temperature === undefined || isNaN(Number(temperature)) ||
+        humidity === undefined || isNaN(Number(humidity)) ||
+        pressure === undefined || isNaN(Number(pressure))
+      ) {
+        continue;
+      }
+
+      let parsedTimestamp = now;
+      if (timestamp) {
+        const ts = new Date(timestamp);
+        if (!isNaN(ts.getTime())) {
+          parsedTimestamp = ts;
+        }
+      }
+
+      validRecords.push({
+        deviceId: deviceId || "GWEATHER-001",
+        temperature: Number(temperature),
+        humidity: Number(humidity),
+        pressure: Number(pressure),
+        light: light !== undefined ? Number(light) : 0,
+        uvIndex: uvIndex !== undefined ? Number(uvIndex) : 0,
+        rainProbability: rainProbability !== undefined ? Number(rainProbability) : 0,
+        rainStatus: rainStatus || "DRY",
+        pressureTrend: pressureTrend || "STEADY",
+        temperatureTrend: temperatureTrend || "STEADY",
+        humidityTrend: humidityTrend || "STEADY",
+        batteryVoltage: batteryVoltage !== undefined ? Number(batteryVoltage) : 0,
+        isUsbPower: isUsbPower !== undefined ? Boolean(isUsbPower) : true,
+        estimatedPowerW: estimatedPowerW !== undefined ? Number(estimatedPowerW) : 0,
+        estimatedEnergyWh: estimatedEnergyWh !== undefined ? Number(estimatedEnergyWh) : 0,
+        uptimeHours: uptimeHours !== undefined ? Number(uptimeHours) : 0,
+        timestamp: parsedTimestamp,
+        receivedAt: now
+      });
+    }
+
+    if (validRecords.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "No valid weather records found in batch."
+      });
+    }
+
+    let insertedCount = 0;
+
+    if (mongoose.connection.readyState === 1) {
+      const timestamps = validRecords.map(r => r.timestamp);
+      const existing = await Weather.find({
+        deviceId: { $in: validRecords.map(r => r.deviceId) },
+        timestamp: { $in: timestamps }
+      }).select('timestamp deviceId').lean();
+
+      const existingSet = new Set(existing.map(e => `${e.deviceId}_${new Date(e.timestamp).getTime()}`));
+      const toInsert = validRecords.filter(r => !existingSet.has(`${r.deviceId}_${r.timestamp.getTime()}`));
+
+      if (toInsert.length > 0) {
+        const result = await Weather.insertMany(toInsert, { ordered: false });
+        insertedCount = result.length;
+      }
+    } else {
+      for (const rec of validRecords) {
+        inMemoryHistory.unshift(rec);
+      }
+      if (inMemoryHistory.length > 1000) {
+        inMemoryHistory = inMemoryHistory.slice(0, 1000);
+      }
+      insertedCount = validRecords.length;
+    }
+
+    addActivityLog(
+      'telemetry',
+      'Offline SD Card Sync',
+      `Synchronized ${insertedCount} historical records from SD card / offline backlog`,
+      { totalReceived: rawRecords.length, insertedCount }
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: `Successfully synced ${insertedCount} offline weather records`,
+      insertedCount,
+      totalReceived: rawRecords.length
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

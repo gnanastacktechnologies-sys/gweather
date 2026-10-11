@@ -7,6 +7,7 @@ import PowerCard from './components/PowerCard';
 import MonthlyCalendar from './components/MonthlyCalendar';
 import RecentActivities from './components/RecentActivities';
 import HistoryCard from './components/HistoryCard';
+import SdSyncModal from './components/SdSyncModal';
 import { getHealth, getLatestWeather, getWeatherHistory } from './services/weatherApi';
 
 export default function App() {
@@ -17,6 +18,7 @@ export default function App() {
   const [filterDays, setFilterDays] = useState(0);
 
   const [isOnline, setIsOnline] = useState(false);
+  const [isSdSyncOpen, setIsSdSyncOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdatedFormatted, setLastUpdatedFormatted] = useState('');
@@ -116,7 +118,11 @@ export default function App() {
 
   return (
     <div className="app-container">
-      <Header isOnline={isOnline} deviceId={weatherData?.deviceId} />
+      <Header
+        isOnline={isOnline}
+        deviceId={weatherData?.deviceId}
+        onOpenSdSync={() => setIsSdSyncOpen(true)}
+      />
 
       <main className="dashboard-content">
         {loading ? (
@@ -260,6 +266,11 @@ export default function App() {
           </div>
         )}
       </main>
+      <SdSyncModal
+        isOpen={isSdSyncOpen}
+        onClose={() => setIsSdSyncOpen(false)}
+        onSyncSuccess={() => fetchTelemetry(filterDays)}
+      />
     </div>
   );
 }

@@ -125,3 +125,25 @@ export const getMonthlyCalendar = async (year, month) => {
     return { success: false, summary: null, days: [] };
   }
 };
+
+/**
+ * Upload multiple offline weather records (from SD card CSV)
+ * POST /api/weather/batch
+ */
+export const uploadWeatherBatch = async (records) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/weather/batch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ records })
+    });
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+

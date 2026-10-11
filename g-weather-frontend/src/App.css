@@ -1112,3 +1112,418 @@ body {
   margin-top: 16px;
   cursor: pointer;
 }
+
+/* ==========================================================================
+   SD CARD OFFLINE DATA SYNC MODAL & DROPZONE
+   ========================================================================== */
+.sd-sync-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 242, 254, 0.12);
+  border: 1px solid rgba(0, 242, 254, 0.35);
+  color: var(--cyan);
+  padding: 6px 14px;
+  border-radius: 9999px;
+  font-family: var(--font-head);
+  font-size: 0.75rem;
+  font-weight: 800;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  transition: all 0.2s ease;
+}
+
+.sd-sync-btn:hover {
+  background: rgba(0, 242, 254, 0.25);
+  border-color: var(--cyan);
+  transform: translateY(-1px);
+  box-shadow: 0 0 15px rgba(0, 242, 254, 0.3);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 7, 16, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 20px;
+}
+
+.sd-sync-modal {
+  width: 100%;
+  max-width: 800px;
+  max-height: 90vh;
+  background: #0b132b;
+  border: 1px solid rgba(0, 242, 254, 0.25);
+  border-radius: 20px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 30px rgba(0, 242, 254, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modalFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; transform: scale(0.96) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(14, 23, 47, 0.7);
+}
+
+.modal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.modal-icon-badge {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: rgba(0, 242, 254, 0.1);
+  border: 1px solid rgba(0, 242, 254, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-title {
+  font-family: var(--font-head);
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.03em;
+  margin: 0;
+}
+
+.modal-subtitle {
+  font-size: 0.8rem;
+  color: var(--text-sub);
+  display: block;
+  margin-top: 3px;
+}
+
+.modal-close-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-sub);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.modal-close-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.file-dropzone {
+  border: 2px dashed rgba(0, 242, 254, 0.35);
+  background: rgba(0, 242, 254, 0.03);
+  border-radius: 16px;
+  padding: 30px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.file-dropzone:hover, .file-dropzone.has-file {
+  border-color: var(--cyan);
+  background: rgba(0, 242, 254, 0.08);
+  box-shadow: inset 0 0 20px rgba(0, 242, 254, 0.05);
+}
+
+.dropzone-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.dropzone-svg {
+  width: 40px;
+  height: 40px;
+  stroke: var(--cyan);
+}
+
+.dropzone-cta {
+  font-family: var(--font-head);
+  font-size: 1rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.dropzone-sub {
+  font-size: 0.8rem;
+  color: var(--text-sub);
+}
+
+.dropzone-filename {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--emerald);
+}
+
+.dropzone-filesize {
+  font-size: 0.8rem;
+  color: var(--text-sub);
+}
+
+.sd-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+@media (min-width: 640px) {
+  .sd-stats-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.sd-stat-card {
+  background: rgba(14, 23, 47, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sd-stat-label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--text-sub);
+  letter-spacing: 0.05em;
+}
+
+.sd-stat-value {
+  font-family: var(--font-head);
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.sd-stat-sub {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.sd-preview-table-wrapper {
+  background: rgba(10, 17, 34, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.sd-preview-table-header {
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--text-sub);
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.table-scroll-container {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.sd-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  text-align: left;
+}
+
+.sd-preview-table th {
+  padding: 8px 12px;
+  background: rgba(14, 23, 47, 0.9);
+  color: var(--text-sub);
+  font-weight: 700;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.sd-preview-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.rain-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.tag-rain {
+  background: rgba(0, 242, 254, 0.15);
+  color: var(--cyan);
+  border: 1px solid rgba(0, 242, 254, 0.3);
+}
+
+.tag-dry {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-sub);
+}
+
+.wifi-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.wifi-on {
+  background: rgba(0, 245, 160, 0.15);
+  color: var(--emerald);
+}
+
+.wifi-off {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.sd-sync-action-box {
+  display: flex;
+  justify-content: center;
+  padding-top: 10px;
+}
+
+.btn-sync-cloud {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 24px;
+  background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+  color: #050811;
+  border: none;
+  border-radius: 14px;
+  font-family: var(--font-head);
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  box-shadow: 0 4px 15px rgba(0, 242, 254, 0.3);
+}
+
+.btn-sync-cloud:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 25px rgba(0, 242, 254, 0.5);
+}
+
+.sync-progress-box {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.sync-progress-bar-bg {
+  width: 100%;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.sync-progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00f2fe, #00f5a0);
+  transition: width 0.3s ease;
+}
+
+.sync-progress-text {
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  color: var(--cyan);
+  font-weight: 700;
+}
+
+.alert-box {
+  padding: 14px 18px;
+  border-radius: 12px;
+  font-size: 0.82rem;
+}
+
+.alert-error {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+.alert-success {
+  background: rgba(0, 245, 160, 0.15);
+  border: 1px solid rgba(0, 245, 160, 0.3);
+  color: var(--emerald);
+}
+
+.modal-footer {
+  padding: 16px 24px;
+  background: rgba(14, 23, 47, 0.7);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.footer-tip {
+  font-size: 0.75rem;
+  color: var(--text-sub);
+  line-height: 1.4;
+}
+
+.btn-modal-close {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  padding: 8px 20px;
+  border-radius: 9999px;
+  font-family: var(--font-head);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-modal-close:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+

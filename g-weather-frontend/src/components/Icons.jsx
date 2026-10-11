@@ -114,3 +114,21 @@ export const RefreshIcon = ({ className = "icon" }) => (
     <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
   </svg>
 );
+
+export const SdCardIcon = ({ className = "icon" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 4v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8.342a2 2 0 0 0-.586-1.414l-4.342-4.342A2 2 0 0 0 13.658 2H6a2 2 0 0 0-2 2z" />
+    <path d="M8 4v4" />
+    <path d="M12 4v4" />
+    <path d="M16 8v-2" />
+  </svg>
+);
+
+export const UploadIcon = ({ className = "icon" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="17 8 12 3 7 8" />
+    <line x1="12" y1="3" x2="12" y2="15" />
+  </svg>
+);
+
