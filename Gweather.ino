@@ -171,6 +171,9 @@ const unsigned long SENSOR_READ_INTERVAL = 10000;
 unsigned long lastTftPageTime = 0;
 const unsigned long TFT_PAGE_INTERVAL = 5000;
 
+unsigned long lastTftRefreshTime = 0;
+const unsigned long TFT_REFRESH_INTERVAL = 2000;
+
 unsigned long lastSdLogTime = 0;
 const unsigned long SD_LOG_INTERVAL = 60000;
 
@@ -192,9 +195,10 @@ const float EST_SD_AVERAGE_MA = 3.0f;
 
 unsigned long lastPowerUpdateTime = 0;
 
-// TFT V3.2 8-Page Management (Zero-Flicker Hardware SPI Engine)
+// TFT V3.2 8-Page Management
 uint8_t currentTftPage = 0;
 const uint8_t TOTAL_TFT_PAGES = 8;
+bool pageNeedsFullRedraw = true;
 
 // Sliding Trend Buffers (last 6 samples over 1 hour)
 const int TREND_SAMPLES = 6;
@@ -219,7 +223,7 @@ void updateTrends();
 void update24HourStats();
 void logToSDCard();
 void updateTFTDisplay();
-void drawTFTPage(uint8_t page);
+void drawTFTPage(uint8_t page, bool fullRedraw);
 String getFormattedTime12HNoSec();
 String getFormattedDateDDMONYYYY();
 String getDayOfWeekNameUpper();
@@ -277,17 +281,9 @@ void setup() {
   lastPowerUpdateTime = millis();
   updatePowerEstimate();
 
-  // Initial Zero-Flicker TFT Setup & Permanent Header
-  digitalWrite(SD_CS, HIGH);
-  tft.startWrite();
+  // Initial Full TFT Render
   tft.fillScreen(COLOR_NAVY);
-  tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-  tft.setTextSize(1);
-  tft.setCursor(37, 8);
-  tft.print("G-WEATHER");
-  tft.drawFastHLine(10, 20, 108, 0x1A3B); // Permanent subtle divider
-  drawTFTPage(currentTftPage);
-  tft.endWrite();
+  drawTFTPage(currentTftPage, true);
 
   // Initial SD log if SD card is ready
   logToSDCard();
@@ -310,8 +306,6 @@ void loop() {
     lastSensorReadTime = currentMillis;
     readSensors();
     applyV2Intelligence();
-    // Smoothly refresh active page with fresh sensor data
-    updateTFTDisplay();
   }
 
   // 4. Periodic History Sampling for Trend Analysis
@@ -327,14 +321,21 @@ void loop() {
     logToSDCard();
   }
 
-  // 6. TFT Page Auto-Rotation (Smooth, Zero-Flicker 5-Second Cycle)
+  // 6. TFT Page Auto-Rotation
   if (currentMillis - lastTftPageTime >= TFT_PAGE_INTERVAL) {
     lastTftPageTime = currentMillis;
     currentTftPage = (currentTftPage + 1) % TOTAL_TFT_PAGES;
+    pageNeedsFullRedraw = true;
+  }
+
+  // 7. TFT Screen Refresh
+  if (currentMillis - lastTftRefreshTime >= TFT_REFRESH_INTERVAL ||
+      pageNeedsFullRedraw) {
+    lastTftRefreshTime = currentMillis;
     updateTFTDisplay();
   }
 
-  // 7. Live Telemetry Upload to Express API
+  // 8. Live Telemetry Upload to Express API
   if (currentMillis - lastTelemetryTime >= TELEMETRY_INTERVAL) {
     lastTelemetryTime = currentMillis;
     handleTelemetryUpload();
@@ -821,33 +822,49 @@ void logToSDCard() {
 }
 
 // ============================================================================
-// ZERO-FLICKER HARDWARE TFT RENDERING ENGINE (8 PAGES, BURST SPI, ZERO BLINK)
+// EXACT V3.2 TFT RENDERING ENGINE (8 PAGES, DEEP NAVY BG, ZERO FLICKER)
 // ============================================================================
 void updateTFTDisplay() {
   // Deselect SD CS pin to isolate SPI bus for TFT Display
   digitalWrite(SD_CS, HIGH);
+  digitalWrite(TFT_CS, LOW);
 
-  // Lock hardware SPI transaction at 27MHz burst speed
-  tft.startWrite();
+  if (pageNeedsFullRedraw) {
+    tft.fillScreen(COLOR_NAVY);
+    drawTFTPage(currentTftPage, true);
+    pageNeedsFullRedraw = false;
+  } else {
+    // Dirty-region dynamic refresh without full screen clear
+    drawTFTPage(currentTftPage, false);
+  }
 
-  // Instant zero-flicker background clear of content area (y=22 to 127) in ~4ms burst
-  // Header ("G-WEATHER") is at y=8-18 and NEVER cleared, preventing top blink
-  tft.fillRect(0, 22, 128, 106, COLOR_NAVY);
-
-  // Render the active page typography and metrics directly into the open SPI bus
-  drawTFTPage(currentTftPage);
-
-  // Commit and release hardware SPI transaction
-  tft.endWrite();
+  digitalWrite(TFT_CS, HIGH);
 }
 
-void drawTFTPage(uint8_t page) {
+void drawTFTPage(uint8_t page, bool fullRedraw) {
+  tft.setTextSize(1);
+
+  // Header Title "G-WEATHER" (Centered at top)
+  if (fullRedraw) {
+    tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
+    tft.setCursor(37, 10);
+    tft.print("G-WEATHER");
+  }
+
   switch (page) {
     case 0: // PAGE 1: TEMPERATURE
-      tft.setTextSize(1);
-      tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-      tft.setCursor(31, 28);
-      tft.print("TEMPERATURE");
+      if (fullRedraw) {
+        tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
+        tft.setCursor(31, 30);
+        tft.print("TEMPERATURE");
+
+        tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
+        tft.setCursor(16, 86);
+        tft.print("24h MIN");
+
+        tft.setCursor(16, 100);
+        tft.print("24h MAX");
+      }
 
       // Large Prominent Temperature
       {
@@ -856,41 +873,46 @@ void drawTFTPage(uint8_t page) {
 
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
-        tft.setCursor(tempX > 0 ? tempX : 0, 48);
+        tft.setCursor(tempX > 0 ? tempX : 0, 54);
         tft.print(tempVal);
       }
 
       // 24h Bounds
       tft.setTextSize(1);
-      tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
-      tft.setCursor(16, 76);
-      tft.print("24h MIN");
-      tft.setCursor(16, 90);
-      tft.print("24h MAX");
-
       tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
-      tft.setCursor(68, 76);
-      tft.print(weather.tempMin24h, 1);
-      tft.print(" C");
 
-      tft.setCursor(68, 90);
+      tft.setCursor(68, 86);
+      tft.print(weather.tempMin24h, 1);
+      tft.print(" C   ");
+
+      tft.setCursor(68, 100);
       tft.print(weather.tempMax24h, 1);
-      tft.print(" C");
+      tft.print(" C   ");
 
       // Trend
       {
         int trendX = (128 - (weather.tempTrend.length() * 6)) / 2;
+
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-        tft.setCursor(trendX > 0 ? trendX : 0, 108);
+        tft.setCursor(trendX > 0 ? trendX : 0, 118);
         tft.print(weather.tempTrend);
+        tft.print("   ");
       }
       break;
 
     case 1: // PAGE 2: HUMIDITY
-      tft.setTextSize(1);
-      tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-      tft.setCursor(40, 28);
-      tft.print("HUMIDITY");
+      if (fullRedraw) {
+        tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
+        tft.setCursor(40, 30);
+        tft.print("HUMIDITY");
+
+        tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
+        tft.setCursor(16, 86);
+        tft.print("24h MIN");
+
+        tft.setCursor(16, 100);
+        tft.print("24h MAX");
+      }
 
       // Large Prominent Humidity
       {
@@ -899,41 +921,39 @@ void drawTFTPage(uint8_t page) {
 
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
-        tft.setCursor(humX > 0 ? humX : 0, 48);
+        tft.setCursor(humX > 0 ? humX : 0, 54);
         tft.print(humVal);
       }
 
       // 24h Bounds
       tft.setTextSize(1);
-      tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
-      tft.setCursor(16, 76);
-      tft.print("24h MIN");
-      tft.setCursor(16, 90);
-      tft.print("24h MAX");
-
       tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
-      tft.setCursor(68, 76);
-      tft.print(weather.humMin24h, 1);
-      tft.print(" %");
 
-      tft.setCursor(68, 90);
+      tft.setCursor(68, 86);
+      tft.print(weather.humMin24h, 1);
+      tft.print(" %   ");
+
+      tft.setCursor(68, 100);
       tft.print(weather.humMax24h, 1);
-      tft.print(" %");
+      tft.print(" %   ");
 
       // Trend
       {
         int trendX = (128 - (weather.humTrend.length() * 6)) / 2;
+
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-        tft.setCursor(trendX > 0 ? trendX : 0, 108);
+        tft.setCursor(trendX > 0 ? trendX : 0, 118);
         tft.print(weather.humTrend);
+        tft.print("   ");
       }
       break;
 
     case 2: // PAGE 3: PRESSURE
-      tft.setTextSize(1);
-      tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-      tft.setCursor(40, 28);
-      tft.print("PRESSURE");
+      if (fullRedraw) {
+        tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
+        tft.setCursor(40, 30);
+        tft.print("PRESSURE");
+      }
 
       // Prominent Pressure
       {
@@ -942,33 +962,29 @@ void drawTFTPage(uint8_t page) {
 
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
-        tft.setCursor(pressX > 0 ? pressX : 0, 54);
+        tft.setCursor(pressX > 0 ? pressX : 0, 60);
         tft.print(pressVal);
       }
 
       // Trend
       {
         tft.setTextSize(1);
-        int trendX = (128 - (weather.pressTrend.length() * 6)) / 2;
-        tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-        tft.setCursor(trendX > 0 ? trendX : 0, 84);
-        tft.print(weather.pressTrend);
-      }
 
-      // Context
-      {
-        tft.setTextSize(1);
-        tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
-        tft.setCursor(16, 106);
-        tft.print("BAROMETER ACTIVE");
+        int trendX = (128 - (weather.pressTrend.length() * 6)) / 2;
+
+        tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
+        tft.setCursor(trendX > 0 ? trendX : 0, 95);
+        tft.print(weather.pressTrend);
+        tft.print("   ");
       }
       break;
 
-    case 3: // PAGE 4: SOLAR & UV
-      tft.setTextSize(1);
-      tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-      tft.setCursor(34, 28);
-      tft.print("SOLAR & UV");
+    case 3: // PAGE 4: SOLAR LIGHT & UV INDEX
+      if (fullRedraw) {
+        tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
+        tft.setCursor(31, 28);
+        tft.print("SOLAR & UV");
+      }
 
       // Prominent Lux
       {
@@ -977,7 +993,7 @@ void drawTFTPage(uint8_t page) {
 
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
-        tft.setCursor(luxX > 0 ? luxX : 0, 48);
+        tft.setCursor(luxX > 0 ? luxX : 0, 50);
         tft.print(luxVal);
       }
 
@@ -987,6 +1003,7 @@ void drawTFTPage(uint8_t page) {
         tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
 
         String cond = "DAYLIGHT";
+
         if (weather.lux < 10.0) {
           cond = "DARK / NIGHT";
         } else if (weather.lux < 300.0) {
@@ -1000,8 +1017,10 @@ void drawTFTPage(uint8_t page) {
         }
 
         int condX = (128 - (cond.length() * 6)) / 2;
-        tft.setCursor(condX > 0 ? condX : 0, 74);
+
+        tft.setCursor(condX > 0 ? condX : 0, 78);
         tft.print(cond);
+        tft.print("   ");
       }
 
       // UV Index & Risk Level Display
@@ -1010,16 +1029,21 @@ void drawTFTPage(uint8_t page) {
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
         String uvStr = "UV: " + String(weather.uvIndex, 1) + " (" + weather.uvLevel + ")";
         int uvX = (128 - (uvStr.length() * 6)) / 2;
-        tft.setCursor(uvX > 0 ? uvX : 0, 96);
+        tft.setCursor(uvX > 0 ? uvX : 0, 102);
         tft.print(uvStr);
+        tft.print("   ");
       }
       break;
 
     case 4: // PAGE 5: RAIN POSSIBILITY
-      tft.setTextSize(1);
-      tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-      tft.setCursor(16, 28);
-      tft.print("RAIN POSSIBILITY");
+      if (fullRedraw) {
+        tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
+        tft.setCursor(16, 28);
+        tft.print("RAIN POSSIBILITY");
+
+        // Progress Bar Outer Frame
+        tft.drawRect(14, 75, 100, 14, ST7735_WHITE);
+      }
 
       // Rain Probability %
       {
@@ -1028,78 +1052,76 @@ void drawTFTPage(uint8_t page) {
 
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
-        tft.setCursor(probX > 0 ? probX : 0, 48);
+        tft.setCursor(probX > 0 ? probX : 0, 50);
         tft.print(probVal);
       }
 
-      // Progress Bar Frame & Fill (No blink, background already solid Navy)
+      // Progress Bar Fill
       {
-        tft.drawRect(14, 72, 100, 14, ST7735_WHITE);
-
         int barW = map(
             constrain((int)weather.rainProbability, 0, 100),
             0, 100, 0, 96
         );
 
+        tft.fillRect(16, 77, 96, 10, COLOR_NAVY);
+
         if (barW > 0) {
-          tft.fillRect(16, 74, barW, 10, ST7735_CYAN);
+          tft.fillRect(16, 77, barW, 10, ST7735_CYAN);
         }
       }
 
       // Rain Status Text
       {
         tft.setTextSize(1);
+
         int statusX = (128 - (weather.rainStatus.length() * 6)) / 2;
+
         tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
-        tft.setCursor(statusX > 0 ? statusX : 0, 96);
+        tft.setCursor(statusX > 0 ? statusX : 0, 100);
         tft.print(weather.rainStatus);
+        tft.print("   ");
       }
       break;
 
     case 5: // PAGE 6: RAIN STATUS
-      tft.setTextSize(1);
-      tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-      tft.setCursor(31, 28);
-      tft.print("RAIN STATUS");
+      if (fullRedraw) {
+        tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
+        tft.setCursor(31, 30);
+        tft.print("RAIN STATUS");
+      }
 
       // Large Prominent Status
       {
         int statusX = (128 - (weather.rainStatus.length() * 12)) / 2;
+
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
-        tft.setCursor(statusX > 0 ? statusX : 0, 56);
+        tft.setCursor(statusX > 0 ? statusX : 0, 70);
         tft.print(weather.rainStatus);
-      }
-
-      // Sensor Status
-      {
-        tft.setTextSize(1);
-        tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
-        tft.setCursor(10, 88);
-        tft.print("INTELLIGENT SENSOR");
-        tft.setCursor(16, 102);
-        tft.print("DUAL-VERIFICATION");
+        tft.print(" ");
       }
       break;
 
     case 6: // PAGE 7: POWER
-      tft.setTextSize(1);
-      tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-      tft.setCursor(49, 28);
-      tft.print("POWER");
+      if (fullRedraw) {
+        tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
+        tft.setCursor(49, 30);
+        tft.print("POWER");
+      }
 
-      // Power Status (USB POWER or Battery Voltage)
+      // Existing Power Status (USB POWER during test mode)
       {
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
 
         if (weather.isUsbPower) {
-          tft.setCursor(10, 48);
+          tft.setCursor(10, 68);
           tft.print("USB POWER");
         } else {
           String vStr = String(weather.batteryVoltage, 2) + " V";
           int vX = (128 - (vStr.length() * 12)) / 2;
-          tft.setCursor(vX > 0 ? vX : 0, 48);
+
+          tft.setCursor(vX > 0 ? vX : 0, 68);
           tft.print(vStr);
         }
       }
@@ -1108,33 +1130,37 @@ void drawTFTPage(uint8_t page) {
       tft.setTextSize(1);
       tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
 
-      tft.setCursor(10, 76);
+      tft.setCursor(8, 100);
       tft.print("EST POWER: ");
       tft.print(weather.estimatedPowerW, 2);
-      tft.print(" W");
+      tft.print(" W   ");
 
       // Accumulated estimated energy since startup
-      tft.setCursor(10, 92);
-      tft.print("ENERGY:    ");
+      tft.setCursor(8, 112);
+      tft.print("ENERGY: ");
       tft.print(weather.estimatedEnergyWh, 2);
-      tft.print(" Wh");
+      tft.print(" Wh   ");
 
       // Runtime since ESP32 startup
-      tft.setCursor(10, 108);
-      tft.print("ON TIME:   ");
+      tft.setCursor(8, 124);
+      tft.print("ON TIME: ");
       tft.print(millis() / 3600000.0, 2);
-      tft.print(" h");
+      tft.print(" h   ");
+
       break;
 
-    case 7: // PAGE 8: DATE & TIME
-      if (rtcAvailable) {
-        nowRTC = rtc.now();
-      }
+    case 7: // PAGE 8: EXACT APPROVED V3.2 DATE & TIME PAGE
+      if (fullRedraw) {
+        // Centered Header "G-WEATHER"
+        tft.setTextSize(1);
+        tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
+        tft.setCursor(37, 10);
+        tft.print("G-WEATHER");
 
-      tft.setTextSize(1);
-      tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-      tft.setCursor(31, 28);
-      tft.print("DATE & TIME");
+        // Centered Subtitle "DATE & TIME"
+        tft.setCursor(31, 30);
+        tft.print("DATE & TIME");
+      }
 
       // 1. Time (12-Hour HH:MM AM/PM, No Seconds)
       {
@@ -1143,7 +1169,7 @@ void drawTFTPage(uint8_t page) {
 
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
-        tft.setCursor(timeX > 0 ? timeX : 0, 48);
+        tft.setCursor(timeX > 0 ? timeX : 0, 54);
         tft.print(timeStr);
       }
 
@@ -1154,7 +1180,7 @@ void drawTFTPage(uint8_t page) {
 
         tft.setTextSize(1);
         tft.setTextColor(ST7735_WHITE, COLOR_NAVY);
-        tft.setCursor(dateX > 0 ? dateX : 0, 76);
+        tft.setCursor(dateX > 0 ? dateX : 0, 86);
         tft.print(dateStr);
       }
 
@@ -1165,7 +1191,7 @@ void drawTFTPage(uint8_t page) {
 
         tft.setTextSize(2);
         tft.setTextColor(ST7735_YELLOW, COLOR_NAVY);
-        tft.setCursor(dayX > 0 ? dayX : 0, 96);
+        tft.setCursor(dayX > 0 ? dayX : 0, 110);
         tft.print(dayStr);
       }
       break;
@@ -1505,5 +1531,4 @@ void syncOfflineSDRecords() {
     Serial.println(" offline records to cloud database!");
   }
 }
-
 
