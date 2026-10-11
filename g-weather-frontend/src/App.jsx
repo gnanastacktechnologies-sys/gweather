@@ -56,8 +56,8 @@ export default function App() {
       if (result.success) {
         setWeatherData(result.data);
         setError(null);
-        if (result.data && (result.data.receivedAt || result.data.timestamp)) {
-          setLastUpdatedFormatted(formatTimestamp(result.data.receivedAt || result.data.timestamp));
+        if (result.data && (result.data.timestamp || result.data.receivedAt)) {
+          setLastUpdatedFormatted(formatTimestamp(result.data.timestamp || result.data.receivedAt));
         }
       } else {
         setWeatherData(null);

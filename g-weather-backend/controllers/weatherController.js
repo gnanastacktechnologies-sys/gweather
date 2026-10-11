@@ -178,7 +178,7 @@ export const getLatestWeather = async (req, res) => {
   try {
     if (mongoose.connection.readyState === 1) {
       try {
-        const dbRecord = await Weather.findOne().sort({ receivedAt: -1 });
+        const dbRecord = await Weather.findOne().sort({ timestamp: -1, receivedAt: -1 });
         if (dbRecord) {
           return res.status(200).json({
             success: true,
@@ -228,9 +228,12 @@ export const getWeatherHistory = async (req, res) => {
         const query = {};
         if (days > 0) {
           const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-          query.receivedAt = { $gte: startDate };
+          query.$or = [
+            { timestamp: { $gte: startDate } },
+            { receivedAt: { $gte: startDate } }
+          ];
         }
-        records = await Weather.find(query).sort({ receivedAt: -1 }).limit(limit);
+        records = await Weather.find(query).sort({ timestamp: -1, receivedAt: -1 }).limit(limit);
       } catch (dbErr) {
         console.error('[DB History Query Warning]', dbErr.message);
       }
@@ -240,7 +243,7 @@ export const getWeatherHistory = async (req, res) => {
       records = [...inMemoryHistory];
       if (days > 0) {
         const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-        records = records.filter(item => new Date(item.receivedAt) >= startDate);
+        records = records.filter(item => new Date(item.timestamp || item.receivedAt) >= startDate);
       }
       records = records.slice(0, limit);
     }
@@ -387,8 +390,11 @@ export const getMonthlyCalendar = async (req, res) => {
     if (mongoose.connection.readyState === 1) {
       try {
         allRecords = await Weather.find({
-          receivedAt: { $gte: startDate, $lte: endDate }
-        }).sort({ receivedAt: 1 });
+          $or: [
+            { timestamp: { $gte: startDate, $lte: endDate } },
+            { receivedAt: { $gte: startDate, $lte: endDate } }
+          ]
+        }).sort({ timestamp: 1, receivedAt: 1 });
       } catch (dbErr) {
         console.error('[DB Calendar Warning]', dbErr.message);
       }
@@ -396,7 +402,7 @@ export const getMonthlyCalendar = async (req, res) => {
 
     if ((!allRecords || allRecords.length === 0) && inMemoryHistory.length > 0) {
       allRecords = inMemoryHistory.filter(r => {
-        const d = new Date(r.receivedAt || r.timestamp);
+        const d = new Date(r.timestamp || r.receivedAt);
         return d >= startDate && d <= endDate;
       });
     }
@@ -411,7 +417,7 @@ export const getMonthlyCalendar = async (req, res) => {
       const dayDateStr = `${year}-${String(month).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
       
       const dayRecords = allRecords.filter(r => {
-        const d = new Date(r.receivedAt || r.timestamp);
+        const d = new Date(r.timestamp || r.receivedAt);
         return d.getDate() === dayNum;
       });
 

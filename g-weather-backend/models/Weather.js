@@ -87,7 +87,8 @@ const weatherSchema = new mongoose.Schema(
   }
 );
 
-// Index for fast sorting by receivedAt date
+// Indexes for fast sorting by timestamp and receivedAt
+weatherSchema.index({ timestamp: -1 });
 weatherSchema.index({ receivedAt: -1 });
 
 const Weather = mongoose.model('Weather', weatherSchema);

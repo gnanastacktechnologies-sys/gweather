@@ -76,7 +76,7 @@ export default function HistoryCard({ historyData, summary, selectedFilter, onFi
               ) : (
                 historyData.map((row, idx) => (
                   <tr key={row._id || idx}>
-                    <td>{formatTime(row.receivedAt || row.timestamp)}</td>
+                    <td>{formatTime(row.timestamp || row.receivedAt)}</td>
                     <td>{row.deviceId || 'GWEATHER-001'}</td>
                     <td><strong>{row.temperature}°C</strong></td>
                     <td>{row.humidity}%</td>
