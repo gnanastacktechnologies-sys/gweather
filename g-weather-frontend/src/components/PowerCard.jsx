@@ -3,7 +3,11 @@ import { BoltIcon, BatteryIcon } from './Icons';
 
 export default function PowerCard({ batteryVoltage, isUsbPower, estimatedPowerW, estimatedEnergyWh, uptimeHours }) {
   const isUsb = isUsbPower !== false && (batteryVoltage === 0 || batteryVoltage < 3.0);
-  const displayVoltage = isUsb ? '5.00 V (USB)' : `${(batteryVoltage || 3.7).toFixed(2)} V`;
+  const isSolar = !isUsb && batteryVoltage >= 4.5;
+  const displayVoltage = isUsb ? '5.00 V (USB)' : `${(batteryVoltage || 5.0).toFixed(2)} V`;
+  const powerSourceBadge = isUsb 
+    ? '🔌 USB POWERED' 
+    : (isSolar ? '☀️ SOLAR POWERED' : '🔋 BATTERY POWERED');
 
   return (
     <div className="card power-card">
@@ -13,7 +17,7 @@ export default function PowerCard({ batteryVoltage, isUsbPower, estimatedPowerW,
           <h2 className="card-title">Power & Hardware Efficiency Engine</h2>
         </div>
         <span className="power-source-badge">
-          {isUsb ? '🔌 USB POWERED' : '🔋 BATTERY POWERED'}
+          {powerSourceBadge}
         </span>
       </div>
 
@@ -22,7 +26,7 @@ export default function PowerCard({ batteryVoltage, isUsbPower, estimatedPowerW,
           <div className="power-box">
             <span className="power-box-label">Supply Voltage</span>
             <span className="power-box-value highlight-gold">{displayVoltage}</span>
-            <span className="power-box-sub">ESP32 DevKit V1</span>
+            <span className="power-box-sub">{isSolar ? 'Solar PV Rail' : (isUsb ? 'USB 5V Supply' : 'Battery Rail')}</span>
           </div>
 
           <div className="power-box">

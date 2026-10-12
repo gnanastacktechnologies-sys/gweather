@@ -178,7 +178,7 @@ unsigned long lastSdLogTime = 0;
 const unsigned long SD_LOG_INTERVAL = 60000;
 
 unsigned long lastTelemetryTime = 0;
-const unsigned long TELEMETRY_INTERVAL = 300000;
+const unsigned long TELEMETRY_INTERVAL = 60000; // 1-Minute High-Precision Live Uploads (Solar Powered)
 
 unsigned long lastHistorySampleTime = 0;
 const unsigned long HISTORY_SAMPLE_INTERVAL = 600000;
@@ -412,7 +412,14 @@ void initPeripherals() {
     if (!rtc.isrunning()) {
       Serial.println("[Hardware Warning] RTC is NOT running! Setting build time.");
       rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+      nowRTC = rtc.now();
     } else {
+      DateTime check = rtc.now();
+      if (check.year() < 2024 || check.year() > 2030 || check.day() > 31 || check.month() > 12) {
+        Serial.println("[Hardware Warning] RTC time corrupted! Re-setting to build time.");
+        rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+      }
+      nowRTC = rtc.now();
       Serial.println("[Hardware] DS1307 RTC detected & running.");
     }
   } else {
@@ -530,9 +537,17 @@ void readSensors() {
     }
   }
 
-  // Read RTC Time
+  // Read RTC Time (with corruption rejection)
   if (rtcAvailable) {
-    nowRTC = rtc.now();
+    DateTime candidate = rtc.now();
+    if (candidate.year() >= 2024 && candidate.year() <= 2030 &&
+        candidate.month() >= 1 && candidate.month() <= 12 &&
+        candidate.day() >= 1 && candidate.day() <= 31 &&
+        candidate.hour() <= 23 && candidate.minute() <= 59) {
+      nowRTC = candidate;
+    } else {
+      Serial.println("[RTC Warning] Corrupted RTC reading ignored; keeping last valid time.");
+    }
   }
 
   // Read BH1750 Lux
@@ -1205,7 +1220,7 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
 // HELPER UTILITIES FOR DATE & TIME FORMATTING
 // ============================================================================
 String getFormattedTime12HNoSec() {
-  if (!rtcAvailable) return "07:35 PM";
+  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "07:35 AM";
 
   int hour12 = nowRTC.hour() % 12;
 
@@ -1214,6 +1229,7 @@ String getFormattedTime12HNoSec() {
   }
 
   const char* ampm = nowRTC.hour() >= 12 ? "PM" : "AM";
+  int minVal = constrain((int)nowRTC.minute(), 0, 59);
 
   char buf[12];
 
@@ -1222,7 +1238,7 @@ String getFormattedTime12HNoSec() {
     sizeof(buf),
     "%02d:%02d %s",
     hour12,
-    nowRTC.minute(),
+    minVal,
     ampm
   );
 
@@ -1230,13 +1246,10 @@ String getFormattedTime12HNoSec() {
 }
 
 String getFormattedDateDDMONYYYY() {
-  if (!rtcAvailable) return "08 OCT 2026";
+  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "12 OCT 2026";
 
-  int m = nowRTC.month();
-
-  if (m < 1 || m > 12) {
-    m = 1;
-  }
+  int m = constrain((int)nowRTC.month(), 1, 12);
+  int d = constrain((int)nowRTC.day(), 1, 31);
 
   char buf[15];
 
@@ -1244,7 +1257,7 @@ String getFormattedDateDDMONYYYY() {
     buf,
     sizeof(buf),
     "%02d %s %04d",
-    nowRTC.day(),
+    d,
     monthNamesUpper[m - 1],
     nowRTC.year()
   );
@@ -1253,7 +1266,7 @@ String getFormattedDateDDMONYYYY() {
 }
 
 String getDayOfWeekNameUpper() {
-  if (!rtcAvailable) return "THURSDAY";
+  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "MONDAY";
 
   int d = nowRTC.dayOfTheWeek();
 
@@ -1265,7 +1278,13 @@ String getDayOfWeekNameUpper() {
 }
 
 String getFormattedISO8601Timestamp() {
-  if (!rtcAvailable) return "2026-01-01T00:00:00+05:30";
+  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "2026-10-12T07:30:00+05:30";
+
+  int m = constrain((int)nowRTC.month(), 1, 12);
+  int d = constrain((int)nowRTC.day(), 1, 31);
+  int h = constrain((int)nowRTC.hour(), 0, 23);
+  int mi = constrain((int)nowRTC.minute(), 0, 59);
+  int s = constrain((int)nowRTC.second(), 0, 59);
 
   char buf[32];
 
@@ -1274,11 +1293,11 @@ String getFormattedISO8601Timestamp() {
     sizeof(buf),
     "%04d-%02d-%02dT%02d:%02d:%02d+05:30",
     nowRTC.year(),
-    nowRTC.month(),
-    nowRTC.day(),
-    nowRTC.hour(),
-    nowRTC.minute(),
-    nowRTC.second()
+    m,
+    d,
+    h,
+    mi,
+    s
   );
 
   return String(buf);

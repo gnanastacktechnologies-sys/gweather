@@ -68,7 +68,7 @@ export default function App() {
     }
 
     try {
-      const histResult = await getWeatherHistory(50, days);
+      const histResult = await getWeatherHistory(100, days);
       if (histResult.success) {
         setHistoryData(histResult.data || []);
         setHistorySummary(histResult.summary || null);

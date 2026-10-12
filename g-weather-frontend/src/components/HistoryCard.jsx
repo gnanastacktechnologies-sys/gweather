@@ -105,7 +105,9 @@ export default function HistoryCard({ historyData, summary, selectedFilter, onFi
                         {row.rainStatus || 'DRY'}
                       </span>
                     </td>
-                    <td>{row.batteryVoltage ? `${row.batteryVoltage.toFixed(2)}V` : 'USB'}</td>
+                    <td>
+                      {row.batteryVoltage >= 4.5 ? `${row.batteryVoltage.toFixed(2)}V ☀️` : (row.batteryVoltage > 0 ? `${row.batteryVoltage.toFixed(2)}V` : 'USB')}
+                    </td>
                   </tr>
                 ))
               )}

@@ -15,8 +15,8 @@ let stationState = {
 };
 
 // Helper to parse station timestamps, ensuring local IST (+05:30) is preserved if no offset provided
-const parseTimestampIST = (raw) => {
-  if (!raw) return new Date();
+const parseTimestampIST = (raw, isBatch = false) => {
+  if (!raw) return isBatch ? null : new Date();
   if (raw instanceof Date) return raw;
   let str = String(raw).trim();
   // If ISO format without timezone offset, e.g. '2026-10-11T22:21:07'
@@ -27,7 +27,16 @@ const parseTimestampIST = (raw) => {
     str += ' GMT+0530';
   }
   const d = new Date(str);
-  return isNaN(d.getTime()) ? new Date() : d;
+  if (isNaN(d.getTime())) return isBatch ? null : new Date();
+
+  // Validate range: reject future timestamps (> 5 mins ahead) or glitched dates (< year 2024 or > year 2030)
+  const maxAllowedFuture = new Date(Date.now() + 5 * 60 * 1000);
+  const minAllowedPast = new Date('2024-01-01T00:00:00Z');
+  if (d > maxAllowedFuture || d < minAllowedPast) {
+    console.warn(`[Timestamp Sanitizer] Rejected corrupted timestamp: '${str}'`);
+    return isBatch ? null : new Date();
+  }
+  return d;
 };
 
 // Log activity event
@@ -187,7 +196,30 @@ export const getLatestWeather = async (req, res) => {
   try {
     if (mongoose.connection.readyState === 1) {
       try {
-        const dbRecord = await Weather.findOne().sort({ timestamp: -1, receivedAt: -1 });
+        const now = new Date();
+        const maxTime = new Date(now.getTime() + 60000);
+        let dbRecord = await Weather.findOne({ timestamp: { $lte: maxTime } }).sort({ timestamp: -1, receivedAt: -1 });
+        
+        // If the latest record came from offline SD batch (which lacks power/uptime fields),
+        // seamlessly preserve the hardware power & runtime metrics from the latest live telemetry record
+        if (dbRecord && (!dbRecord.uptimeHours || !dbRecord.estimatedPowerW)) {
+          const liveWithPower = await Weather.findOne({ 
+            uptimeHours: { $gt: 0 },
+            timestamp: { $lte: maxTime } 
+          }).sort({ timestamp: -1, receivedAt: -1 });
+          
+          if (liveWithPower) {
+            dbRecord = dbRecord.toObject ? dbRecord.toObject() : { ...dbRecord };
+            dbRecord.estimatedPowerW = liveWithPower.estimatedPowerW;
+            dbRecord.estimatedEnergyWh = liveWithPower.estimatedEnergyWh;
+            dbRecord.uptimeHours = liveWithPower.uptimeHours;
+            if (!dbRecord.batteryVoltage && liveWithPower.batteryVoltage) {
+              dbRecord.batteryVoltage = liveWithPower.batteryVoltage;
+              dbRecord.isUsbPower = liveWithPower.isUsbPower;
+            }
+          }
+        }
+
         if (dbRecord) {
           return res.status(200).json({
             success: true,
@@ -556,7 +588,10 @@ export const postWeatherBatch = async (req, res, next) => {
         continue;
       }
 
-      const parsedTimestamp = parseTimestampIST(timestamp);
+      const parsedTimestamp = parseTimestampIST(timestamp, true);
+      if (!parsedTimestamp) {
+        continue;
+      }
 
       validRecords.push({
         deviceId: deviceId || "GWEATHER-001",
@@ -581,9 +616,11 @@ export const postWeatherBatch = async (req, res, next) => {
     }
 
     if (validRecords.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: "No valid weather records found in batch."
+      return res.status(200).json({
+        success: true,
+        message: "Batch processed; all records skipped due to invalid/corrupted timestamps.",
+        insertedCount: 0,
+        totalReceived: rawRecords.length
       });
     }
 
