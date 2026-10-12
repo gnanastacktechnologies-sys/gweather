@@ -48,6 +48,7 @@
 #include <RTClib.h>
 #include <SD.h>
 #include <FS.h>
+#include <Preferences.h>
 
 // ============================================================================
 // WIFI CONFIGURATION (STAGE 2)
@@ -412,19 +413,33 @@ void initPeripherals() {
   if (rtc.begin()) {
     rtcAvailable = true;
 
-    if (!rtc.isrunning()) {
-      Serial.println("[Hardware Warning] RTC is NOT running! Setting build time.");
-      rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-      nowRTC = rtc.now();
+    // Use ESP32 Non-Volatile Storage (NVS) to ensure one-time calibration to 08:45 AM on flash
+    Preferences prefs;
+    prefs.begin("rtc_sync", false);
+    uint32_t lastAdjustMagic = prefs.getUInt("magic", 0);
+    const uint32_t FLASH_SYNC_ID = 2026101202; // Flash ID for Oct 12, 2026 08:45 AM
+
+    if (lastAdjustMagic != FLASH_SYNC_ID) {
+      // First boot immediately after flash: Calibrate hardware RTC to 08:45:00 AM
+      rtc.adjust(DateTime(2026, 10, 12, 8, 45, 0));
+      prefs.putUInt("magic", FLASH_SYNC_ID);
+      Serial.println("[Hardware RTC] Calibrated to 08:45:00 AM (12 OCT 2026) on flash.");
+    } else if (!rtc.isrunning()) {
+      Serial.println("[Hardware Warning] RTC oscillator stopped. Setting 08:45 AM.");
+      rtc.adjust(DateTime(2026, 10, 12, 8, 45, 0));
     } else {
       DateTime check = rtc.now();
       if (check.year() < 2024 || check.year() > 2030 || check.day() > 31 || check.month() > 12) {
-        Serial.println("[Hardware Warning] RTC time corrupted! Re-setting to build time.");
-        rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+        Serial.println("[Hardware Warning] RTC time corrupted! Re-calibrating to 08:45 AM.");
+        rtc.adjust(DateTime(2026, 10, 12, 8, 45, 0));
+      } else {
+        Serial.println("[Hardware RTC] Normal restart: RTC continues ticking without reset.");
       }
-      nowRTC = rtc.now();
-      Serial.println("[Hardware] DS1307 RTC detected & running.");
     }
+    prefs.end();
+
+    nowRTC = rtc.now();
+    Serial.println("[Hardware] DS1307 RTC running.");
   } else {
     Serial.println("[Hardware Warning] DS1307 RTC not detected at 0x68.");
   }
@@ -1244,7 +1259,7 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
 // HELPER UTILITIES FOR DATE & TIME FORMATTING
 // ============================================================================
 String getFormattedTime12HNoSec() {
-  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "07:35 AM";
+  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "08:45 AM";
 
   int hour12 = nowRTC.hour() % 12;
 
@@ -1302,7 +1317,7 @@ String getDayOfWeekNameUpper() {
 }
 
 String getFormattedISO8601Timestamp() {
-  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "2026-10-12T07:30:00+05:30";
+  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "2026-10-12T08:45:00+05:30";
 
   int m = constrain((int)nowRTC.month(), 1, 12);
   int d = constrain((int)nowRTC.day(), 1, 31);
