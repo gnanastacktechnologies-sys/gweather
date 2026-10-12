@@ -113,8 +113,8 @@ Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 // GLOBAL WEATHER DATA & INTELLIGENCE STATE
 // ============================================================================
 struct WeatherData {
-  float temperature = 24.0;
-  float humidity = 75.0;
+  float temperature = 0.0;
+  float humidity = 0.0;
   float pressure = 0.0;
   float altitude = 0.0;
   float lux = 0.0;
@@ -265,7 +265,31 @@ void setup() {
   // Initialize Hardware Peripherals
   initPeripherals();
 
-  // Initialize Wi-Fi in Station Mode
+  // Allow DHT22 sensor 2 seconds after power-on to complete internal boot cycle
+  delay(2000);
+
+  // Poll DHT22 on boot until valid reading or up to 3 attempts (with 2s spacing)
+  for (int attempt = 0; attempt < 3; attempt++) {
+    float t = dht.readTemperature();
+    float h = dht.readHumidity();
+    if (!isnan(t) && !isnan(h) && t >= -20.0 && t <= 60.0 && h >= 0.0 && h <= 100.0) {
+      weather.temperature = t;
+      weather.humidity = h;
+      Serial.print("[Sensor] DHT22 calibrated on boot: ");
+      Serial.print(t);
+      Serial.print(" C, ");
+      Serial.print(h);
+      Serial.println(" %");
+      break;
+    }
+    delay(2000);
+  }
+
+  // Initial Data Sample for all other sensors
+  readSensors();
+  applyV2Intelligence();
+
+  // Initialize Wi-Fi in Station Mode (started after initial sensor calibration)
   WiFi.persistent(false);
   setCpuFrequencyMhz(80);
   WiFi.setSleep(true);
@@ -273,13 +297,6 @@ void setup() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   Serial.println("Wi-Fi connecting...");
-
-  // Allow DHT22 sensor 1.5 seconds to stabilize power after startup
-  delay(1500);
-
-  // Initial Data Sample
-  readSensors();
-  applyV2Intelligence();
 
   // Initialize power monitor timer after initial sensor setup
   lastPowerUpdateTime = millis();
@@ -534,24 +551,19 @@ void handleWiFiNonBlocking() {
 // SENSOR READING ENGINE
 // ============================================================================
 void readSensors() {
-  // Read DHT22 with retry
+  // 1. Read DHT22 (Ambient Temperature & Humidity)
   float t = dht.readTemperature();
   float h = dht.readHumidity();
 
-  if (isnan(t) || isnan(h)) {
-    delay(50);
-    if (isnan(t)) t = dht.readTemperature();
-    if (isnan(h)) h = dht.readHumidity();
-  }
-
-  if (!isnan(t) && t > -40.0 && t < 80.0) {
+  // Accept valid atmospheric readings (-20°C to 60°C, 0% to 100%)
+  if (!isnan(t) && t >= -20.0 && t <= 60.0) {
     weather.temperature = t;
   }
   if (!isnan(h) && h >= 0.0 && h <= 100.0) {
     weather.humidity = h;
   }
 
-  // Read BMP280
+  // 2. Read BMP280 (Barometric Pressure & Altitude)
   if (bmpAvailable) {
     float p = bmp.readPressure() / 100.0F;
     float alt = bmp.readAltitude(1013.25);
@@ -562,17 +574,6 @@ void readSensors() {
 
     if (!isnan(alt)) {
       weather.altitude = alt;
-    }
-
-    // BMP280 High-Precision Temperature Fallback (if DHT22 timed out or disconnected)
-    if (weather.temperature == 0.0 || isnan(t)) {
-      float bmpT = bmp.readTemperature();
-      if (!isnan(bmpT) && bmpT > -40.0 && bmpT < 85.0) {
-        weather.temperature = bmpT;
-        Serial.print("[Sensor Notice] DHT22 unreadable; using BMP280 temperature fallback: ");
-        Serial.print(bmpT);
-        Serial.println(" C");
-      }
     }
   }
 
@@ -1348,6 +1349,12 @@ String getFormattedISO8601Timestamp() {
 void handleTelemetryUpload() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[Telemetry] Skipped - Wi-Fi offline");
+    return;
+  }
+
+  // Prevent sending uninitialized 0.0/0.0 telemetry packet right after boot
+  if (weather.temperature <= 0.0 && weather.humidity <= 0.0) {
+    Serial.println("[Telemetry] Skipped - Waiting for initial sensor reading");
     return;
   }
 
