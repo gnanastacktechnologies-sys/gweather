@@ -286,31 +286,7 @@ void setup() {
   // Initialize Hardware Peripherals
   initPeripherals();
 
-  // Allow DHT22 sensor 2 seconds after power-on to complete internal boot cycle
-  delay(2000);
-
-  // Poll DHT22 on boot until valid reading or up to 3 attempts (with 2s spacing)
-  for (int attempt = 0; attempt < 3; attempt++) {
-    float t = dht.readTemperature();
-    float h = dht.readHumidity();
-    if (!isnan(t) && !isnan(h) && t >= -20.0 && t <= 60.0 && h >= 0.0 && h <= 100.0) {
-      weather.temperature = t;
-      weather.humidity = h;
-      Serial.print("[Sensor] DHT22 calibrated on boot: ");
-      Serial.print(t);
-      Serial.print(" C, ");
-      Serial.print(h);
-      Serial.println(" %");
-      break;
-    }
-    delay(2000);
-  }
-
-  // Initial Data Sample for all other sensors
-  readSensors();
-  applyV2Intelligence();
-
-  // Initialize Wi-Fi in Station Mode (started after initial sensor calibration)
+  // Initialize Wi-Fi in Station Mode
   WiFi.persistent(false);
   setCpuFrequencyMhz(80);
   WiFi.setSleep(true);
@@ -318,6 +294,10 @@ void setup() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   Serial.println("Wi-Fi connecting...");
+
+  // Initial Data Sample
+  readSensors();
+  applyV2Intelligence();
 
   // Initialize power monitor timer after initial sensor setup
   lastPowerUpdateTime = millis();
@@ -432,6 +412,7 @@ void updatePowerEstimate() {
 // ============================================================================
 void initPeripherals() {
   // 1. DHT22
+  pinMode(DHT_PIN, INPUT_PULLUP);
   dht.begin();
   Serial.println("[Hardware] DHT22 initialized.");
 
@@ -581,11 +562,10 @@ void readSensors() {
   float t = dht.readTemperature();
   float h = dht.readHumidity();
 
-  // Accept valid atmospheric readings (-20°C to 60°C, 0% to 100%)
-  if (!isnan(t) && t >= -20.0 && t <= 60.0) {
+  if (!isnan(t)) {
     weather.temperature = t;
   }
-  if (!isnan(h) && h >= 0.0 && h <= 100.0) {
+  if (!isnan(h)) {
     weather.humidity = h;
   }
 
@@ -1449,12 +1429,6 @@ String getFormattedISO8601Timestamp() {
 void handleTelemetryUpload() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[Telemetry] Skipped - Wi-Fi offline");
-    return;
-  }
-
-  // Prevent sending uninitialized 0.0/0.0 telemetry packet right after boot
-  if (weather.temperature <= 0.0 && weather.humidity <= 0.0) {
-    Serial.println("[Telemetry] Skipped - Waiting for initial sensor reading");
     return;
   }
 
