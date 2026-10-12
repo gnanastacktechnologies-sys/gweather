@@ -273,6 +273,9 @@ void setup() {
 
   Serial.println("Wi-Fi connecting...");
 
+  // Allow DHT22 sensor 1.5 seconds to stabilize power after startup
+  delay(1500);
+
   // Initial Data Sample
   readSensors();
   applyV2Intelligence();
@@ -516,12 +519,22 @@ void handleWiFiNonBlocking() {
 // SENSOR READING ENGINE
 // ============================================================================
 void readSensors() {
-  // Read DHT22
+  // Read DHT22 with retry
   float t = dht.readTemperature();
   float h = dht.readHumidity();
 
-  if (!isnan(t)) weather.temperature = t;
-  if (!isnan(h)) weather.humidity = h;
+  if (isnan(t) || isnan(h)) {
+    delay(50);
+    if (isnan(t)) t = dht.readTemperature();
+    if (isnan(h)) h = dht.readHumidity();
+  }
+
+  if (!isnan(t) && t > -40.0 && t < 80.0) {
+    weather.temperature = t;
+  }
+  if (!isnan(h) && h >= 0.0 && h <= 100.0) {
+    weather.humidity = h;
+  }
 
   // Read BMP280
   if (bmpAvailable) {
@@ -534,6 +547,17 @@ void readSensors() {
 
     if (!isnan(alt)) {
       weather.altitude = alt;
+    }
+
+    // BMP280 High-Precision Temperature Fallback (if DHT22 timed out or disconnected)
+    if (weather.temperature == 0.0 || isnan(t)) {
+      float bmpT = bmp.readTemperature();
+      if (!isnan(bmpT) && bmpT > -40.0 && bmpT < 85.0) {
+        weather.temperature = bmpT;
+        Serial.print("[Sensor Notice] DHT22 unreadable; using BMP280 temperature fallback: ");
+        Serial.print(bmpT);
+        Serial.println(" C");
+      }
     }
   }
 

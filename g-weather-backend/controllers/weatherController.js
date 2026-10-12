@@ -220,6 +220,21 @@ export const getLatestWeather = async (req, res) => {
           }
         }
 
+        // If the latest record had zeroed temperature and humidity (DHT22 sensor read timeout / boot glitch),
+        // seamlessly preserve the last valid temperature and humidity readings
+        if (dbRecord && dbRecord.temperature === 0 && dbRecord.humidity === 0) {
+          const liveWithSensor = await Weather.findOne({ 
+            temperature: { $gt: 0 },
+            timestamp: { $lte: maxTime } 
+          }).sort({ timestamp: -1, receivedAt: -1 });
+
+          if (liveWithSensor) {
+            dbRecord = dbRecord.toObject ? dbRecord.toObject() : { ...dbRecord };
+            dbRecord.temperature = liveWithSensor.temperature;
+            dbRecord.humidity = liveWithSensor.humidity;
+          }
+        }
+
         if (dbRecord) {
           return res.status(200).json({
             success: true,
