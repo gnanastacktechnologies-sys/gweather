@@ -140,10 +140,27 @@ export const postWeatherData = async (req, res, next) => {
 
     stationState.lastSeenAt = now;
 
+    let finalTemp = Number(temperature);
+    let finalHum = Number(humidity);
+
+    // If incoming packet has 0/0 due to sensor boot glitch, rescue from previous valid readings
+    if (finalTemp === 0 && finalHum === 0) {
+      if (inMemoryLatest && inMemoryLatest.temperature > 0) {
+        finalTemp = inMemoryLatest.temperature;
+        finalHum = inMemoryLatest.humidity;
+      } else if (mongoose.connection.readyState === 1) {
+        const lastValid = await Weather.findOne({ temperature: { $gt: 0 } }).sort({ timestamp: -1, receivedAt: -1 });
+        if (lastValid) {
+          finalTemp = lastValid.temperature;
+          finalHum = lastValid.humidity;
+        }
+      }
+    }
+
     const payload = {
       deviceId: deviceId || "GWEATHER-001",
-      temperature: Number(temperature),
-      humidity: Number(humidity),
+      temperature: finalTemp,
+      humidity: finalHum,
       pressure: Number(pressure),
       light: light !== undefined ? Number(light) : 0,
       uvIndex: uvIndex !== undefined ? Number(uvIndex) : 0,

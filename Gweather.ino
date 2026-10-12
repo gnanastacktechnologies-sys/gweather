@@ -113,8 +113,8 @@ Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 // GLOBAL WEATHER DATA & INTELLIGENCE STATE
 // ============================================================================
 struct WeatherData {
-  float temperature = 0.0;
-  float humidity = 0.0;
+  float temperature = 24.0;
+  float humidity = 75.0;
   float pressure = 0.0;
   float altitude = 0.0;
   float lux = 0.0;
