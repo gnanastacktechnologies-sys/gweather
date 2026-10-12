@@ -174,6 +174,7 @@ export const postWeatherData = async (req, res, next) => {
       estimatedPowerW: estimatedPowerW !== undefined ? Number(estimatedPowerW) : 0,
       estimatedEnergyWh: estimatedEnergyWh !== undefined ? Number(estimatedEnergyWh) : 0,
       uptimeHours: uptimeHours !== undefined ? Number(uptimeHours) : 0,
+      source: req.body.source || "live",
       timestamp: parsedTimestamp,
       receivedAt: now
     };
@@ -643,6 +644,7 @@ export const postWeatherBatch = async (req, res, next) => {
         estimatedPowerW: estimatedPowerW !== undefined ? Number(estimatedPowerW) : 0,
         estimatedEnergyWh: estimatedEnergyWh !== undefined ? Number(estimatedEnergyWh) : 0,
         uptimeHours: uptimeHours !== undefined ? Number(uptimeHours) : 0,
+        source: item.source || "sd_average",
         timestamp: parsedTimestamp,
         receivedAt: now
       });

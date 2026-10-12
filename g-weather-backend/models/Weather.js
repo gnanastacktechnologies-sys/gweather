@@ -79,6 +79,11 @@ const weatherSchema = new mongoose.Schema(
     uptimeHours: {
       type: Number,
       default: 0
+    },
+    source: {
+      type: String,
+      default: 'live',
+      trim: true
     }
   },
   {

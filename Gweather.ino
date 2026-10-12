@@ -176,7 +176,26 @@ unsigned long lastTftRefreshTime = 0;
 const unsigned long TFT_REFRESH_INTERVAL = 2000;
 
 unsigned long lastSdLogTime = 0;
-const unsigned long SD_LOG_INTERVAL = 60000;
+const unsigned long SD_LOG_INTERVAL = 300000; // 5-Minute Intelligent Rolling Average Window
+
+// ============================================================================
+// INTELLIGENT SD CARD METEOROLOGICAL AGGREGATOR
+// ============================================================================
+struct SDAggregator {
+  double sumTemp = 0.0;
+  double sumHum = 0.0;
+  double sumPress = 0.0;
+  double sumLux = 0.0;
+  double sumUv = 0.0;
+  double sumRainProb = 0.0;
+  double sumBatVolt = 0.0;
+  int sampleCount = 0;
+
+  String lastRainStatus = "DRY";
+  float lastEventTemp = -999.0;
+};
+
+SDAggregator sdAggregator;
 
 unsigned long lastTelemetryTime = 0;
 const unsigned long TELEMETRY_INTERVAL = 60000; // 1-Minute High-Precision Live Uploads (Solar Powered)
@@ -222,7 +241,9 @@ void readSensors();
 void applyV2Intelligence();
 void updateTrends();
 void update24HourStats();
-void logToSDCard();
+void logToSDCard(const char* logType = "AVG");
+void accumulateSDSample();
+bool checkSDEventTrigger();
 void updateTFTDisplay();
 void drawTFTPage(uint8_t page, bool fullRedraw);
 String getFormattedTime12HNoSec();
@@ -327,6 +348,7 @@ void loop() {
     lastSensorReadTime = currentMillis;
     readSensors();
     applyV2Intelligence();
+    accumulateSDSample();
   }
 
   // 4. Periodic History Sampling for Trend Analysis
@@ -336,10 +358,14 @@ void loop() {
     updateTrends();
   }
 
-  // 5. SD Card Logging
-  if (currentMillis - lastSdLogTime >= SD_LOG_INTERVAL) {
+  // 5. Intelligent SD Card Logging (5-Minute Mathematical Average OR Instant Event Trigger)
+  bool isEvent = checkSDEventTrigger();
+  if (isEvent) {
     lastSdLogTime = currentMillis;
-    logToSDCard();
+    logToSDCard("EVENT");
+  } else if (currentMillis - lastSdLogTime >= SD_LOG_INTERVAL) {
+    lastSdLogTime = currentMillis;
+    logToSDCard("AVG");
   }
 
   // 6. TFT Page Auto-Rotation
@@ -488,7 +514,7 @@ void initPeripherals() {
         logFile.println(
           "Timestamp,Temp_C,Hum_Pct,Press_hPa,Lux,UV_Index,Rain_Raw,Rain_Filt,"
           "Rain_Prob_Pct,Rain_Status,Temp_Trend,Hum_Trend,Press_Trend,"
-          "Temp_Min24h,Temp_Max24h,Hum_Min24h,Hum_Max24h,WiFi_Status,Battery_V"
+          "Temp_Min24h,Temp_Max24h,Hum_Min24h,Hum_Max24h,WiFi_Status,Battery_V,Log_Type"
         );
 
         logFile.close();
@@ -792,19 +818,75 @@ void update24HourStats() {
 }
 
 // ============================================================================
-// MICROSD CARD LOGGING (1 MINUTE INTERVAL)
+// INTELLIGENT METEOROLOGICAL SD CARD AGGREGATOR & LOGGING ENGINE
 // ============================================================================
-void logToSDCard() {
+void accumulateSDSample() {
+  if (weather.temperature >= -30.0 && weather.temperature <= 65.0 && weather.humidity >= 0.0) {
+    sdAggregator.sumTemp += weather.temperature;
+    sdAggregator.sumHum += weather.humidity;
+    sdAggregator.sumPress += weather.pressure;
+    sdAggregator.sumLux += weather.lux;
+    sdAggregator.sumUv += weather.uvIndex;
+    sdAggregator.sumRainProb += weather.rainProbability;
+    sdAggregator.sumBatVolt += weather.batteryVoltage;
+    sdAggregator.sampleCount++;
+  }
+}
+
+bool checkSDEventTrigger() {
+  if (sdAggregator.sampleCount == 0) return false;
+
+  // 1. Storm / Rain Start Anomaly (DRY -> Active Rain)
+  if (weather.rainStatus != "DRY" && sdAggregator.lastRainStatus == "DRY") {
+    sdAggregator.lastRainStatus = weather.rainStatus;
+    Serial.println("[SD Event] Immediate event trigger: Rain onset detected!");
+    return true;
+  }
+  sdAggregator.lastRainStatus = weather.rainStatus;
+
+  // 2. Cold Front / Temperature Anomaly (Sudden Drop >= 2.0°C)
+  if (sdAggregator.lastEventTemp > -100.0) {
+    float tempDrop = sdAggregator.lastEventTemp - weather.temperature;
+    if (tempDrop >= 2.0) {
+      sdAggregator.lastEventTemp = weather.temperature;
+      Serial.println("[SD Event] Immediate event trigger: Rapid temperature drop front!");
+      return true;
+    }
+  } else {
+    sdAggregator.lastEventTemp = weather.temperature;
+  }
+
+  return false;
+}
+
+void logToSDCard(const char* logType) {
   if (!sdAvailable) return;
+
+  // Compute 5-minute mathematical averages or instantaneous event values
+  float logTemp = weather.temperature;
+  float logHum = weather.humidity;
+  float logPress = weather.pressure;
+  float logLux = weather.lux;
+  float logUv = weather.uvIndex;
+  float logRainProb = weather.rainProbability;
+  float logBat = weather.batteryVoltage;
+
+  if (strcmp(logType, "AVG") == 0 && sdAggregator.sampleCount > 0) {
+    logTemp = sdAggregator.sumTemp / (double)sdAggregator.sampleCount;
+    logHum = sdAggregator.sumHum / (double)sdAggregator.sampleCount;
+    logPress = sdAggregator.sumPress / (double)sdAggregator.sampleCount;
+    logLux = sdAggregator.sumLux / (double)sdAggregator.sampleCount;
+    logUv = sdAggregator.sumUv / (double)sdAggregator.sampleCount;
+    logRainProb = sdAggregator.sumRainProb / (double)sdAggregator.sampleCount;
+    logBat = sdAggregator.sumBatVolt / (double)sdAggregator.sampleCount;
+  }
 
   // Deselect TFT CS pin to ensure clean SPI bus state for MicroSD Card
   digitalWrite(TFT_CS, HIGH);
   digitalWrite(SD_CS, LOW);
 
   File logFile = SD.open("/weather_log.csv", FILE_APPEND);
-
   if (!logFile) {
-    // Fallback retry mode
     logFile = SD.open("/weather_log.csv", "a");
   }
 
@@ -814,19 +896,19 @@ void logToSDCard() {
     logFile.print(getFormattedTime12HNoSec());
     logFile.print(",");
 
-    logFile.print(weather.temperature, 2);
+    logFile.print(logTemp, 2);
     logFile.print(",");
 
-    logFile.print(weather.humidity, 2);
+    logFile.print(logHum, 2);
     logFile.print(",");
 
-    logFile.print(weather.pressure, 2);
+    logFile.print(logPress, 2);
     logFile.print(",");
 
-    logFile.print(weather.lux, 1);
+    logFile.print(logLux, 1);
     logFile.print(",");
 
-    logFile.print(weather.uvIndex, 1);
+    logFile.print(logUv, 1);
     logFile.print(",");
 
     logFile.print(weather.rainRaw);
@@ -835,7 +917,7 @@ void logToSDCard() {
     logFile.print(weather.rainFiltered, 1);
     logFile.print(",");
 
-    logFile.print(weather.rainProbability, 1);
+    logFile.print(logRainProb, 1);
     logFile.print(",");
 
     logFile.print(weather.rainStatus);
@@ -867,13 +949,31 @@ void logToSDCard() {
     );
     logFile.print(",");
 
-    logFile.println(weather.batteryVoltage, 2);
+    logFile.print(logBat, 2);
+    logFile.print(",");
+
+    logFile.println(logType); // "AVG" or "EVENT"
 
     logFile.close();
-    Serial.println("[SD Log] Data log entry written to /weather_log.csv");
+    Serial.print("[SD Log] Written ");
+    Serial.print(logType);
+    Serial.print(" (Samples: ");
+    Serial.print(sdAggregator.sampleCount);
+    Serial.println(") to /weather_log.csv");
   } else {
     Serial.println("[SD Log Error] Failed to open /weather_log.csv for writing.");
   }
+
+  // Reset accumulator for next rolling window
+  sdAggregator.sumTemp = 0.0;
+  sdAggregator.sumHum = 0.0;
+  sdAggregator.sumPress = 0.0;
+  sdAggregator.sumLux = 0.0;
+  sdAggregator.sumUv = 0.0;
+  sdAggregator.sumRainProb = 0.0;
+  sdAggregator.sumBatVolt = 0.0;
+  sdAggregator.sampleCount = 0;
+  sdAggregator.lastEventTemp = weather.temperature;
 
   // Release SD CS pin after transaction
   digitalWrite(SD_CS, HIGH);
@@ -1547,14 +1647,40 @@ void syncOfflineSDRecords() {
       batchJson += "\"rainStatus\":\"" + rStat + "\"";
 
       int lastComma = line.lastIndexOf(',');
+      String logType = "sd_average";
       if (lastComma > c10) {
-        String volt = line.substring(lastComma + 1);
-        volt.trim();
-        float vVal = volt.toFloat();
-        if (vVal > 0.05) {
-          batchJson += ",\"batteryVoltage\":" + String(vVal, 2) + ",\"isUsbPower\":false";
+        String tag = line.substring(lastComma + 1);
+        tag.trim();
+        if (tag == "EVENT") {
+          logType = "sd_event";
+          int prevComma = line.lastIndexOf(',', lastComma - 1);
+          if (prevComma > c10) {
+            String volt = line.substring(prevComma + 1, lastComma);
+            volt.trim();
+            float vVal = volt.toFloat();
+            if (vVal > 0.05) {
+              batchJson += ",\"batteryVoltage\":" + String(vVal, 2) + ",\"isUsbPower\":false";
+            }
+          }
+        } else if (tag == "AVG") {
+          logType = "sd_average";
+          int prevComma = line.lastIndexOf(',', lastComma - 1);
+          if (prevComma > c10) {
+            String volt = line.substring(prevComma + 1, lastComma);
+            volt.trim();
+            float vVal = volt.toFloat();
+            if (vVal > 0.05) {
+              batchJson += ",\"batteryVoltage\":" + String(vVal, 2) + ",\"isUsbPower\":false";
+            }
+          }
+        } else {
+          float vVal = tag.toFloat();
+          if (vVal > 0.05) {
+            batchJson += ",\"batteryVoltage\":" + String(vVal, 2) + ",\"isUsbPower\":false";
+          }
         }
       }
+      batchJson += ",\"source\":\"" + logType + "\"";
       batchJson += "}";
 
       recordCount++;
