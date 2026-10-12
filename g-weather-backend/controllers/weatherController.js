@@ -281,13 +281,14 @@ export const getWeatherHistory = async (req, res) => {
 
     if (mongoose.connection.readyState === 1) {
       try {
-        const query = {};
+        const maxTime = new Date(Date.now() + 5 * 60 * 1000);
+        const query = { 
+          timestamp: { $lte: maxTime },
+          temperature: { $gt: 0 }
+        };
         if (days > 0) {
           const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-          query.$or = [
-            { timestamp: { $gte: startDate } },
-            { receivedAt: { $gte: startDate } }
-          ];
+          query.timestamp.$gte = startDate;
         }
         records = await Weather.find(query).sort({ timestamp: -1, receivedAt: -1 }).limit(limit);
       } catch (dbErr) {
