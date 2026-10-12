@@ -460,21 +460,21 @@ void initPeripherals() {
     Preferences prefs;
     prefs.begin("rtc_sync", false);
     uint32_t lastAdjustMagic = prefs.getUInt("magic", 0);
-    const uint32_t FLASH_SYNC_ID = 2026101202; // Flash ID for Oct 12, 2026 08:45 AM
+    const uint32_t FLASH_SYNC_ID = 2026101204; // Flash ID for Oct 12, 2026 07:30 PM
 
     if (lastAdjustMagic != FLASH_SYNC_ID) {
-      // First boot immediately after flash: Calibrate hardware RTC to 08:45:00 AM
-      rtc.adjust(DateTime(2026, 10, 12, 8, 45, 0));
+      // First boot immediately after flash: Calibrate hardware RTC to 07:30:00 PM
+      rtc.adjust(DateTime(2026, 10, 12, 19, 30, 0));
       prefs.putUInt("magic", FLASH_SYNC_ID);
-      Serial.println("[Hardware RTC] Calibrated to 08:45:00 AM (12 OCT 2026) on flash.");
+      Serial.println("[Hardware RTC] Calibrated to 07:30:00 PM (12 OCT 2026) on flash.");
     } else if (!rtc.isrunning()) {
-      Serial.println("[Hardware Warning] RTC oscillator stopped. Setting 08:45 AM.");
-      rtc.adjust(DateTime(2026, 10, 12, 8, 45, 0));
+      Serial.println("[Hardware Warning] RTC oscillator stopped. Setting 07:30 PM.");
+      rtc.adjust(DateTime(2026, 10, 12, 19, 30, 0));
     } else {
       DateTime check = rtc.now();
       if (check.year() < 2024 || check.year() > 2030 || check.day() > 31 || check.month() > 12) {
-        Serial.println("[Hardware Warning] RTC time corrupted! Re-calibrating to 08:45 AM.");
-        rtc.adjust(DateTime(2026, 10, 12, 8, 45, 0));
+        Serial.println("[Hardware Warning] RTC time corrupted! Re-calibrating to 07:30 PM.");
+        rtc.adjust(DateTime(2026, 10, 12, 19, 30, 0));
       } else {
         Serial.println("[Hardware RTC] Normal restart: RTC continues ticking without reset.");
       }
@@ -1360,7 +1360,7 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
 // HELPER UTILITIES FOR DATE & TIME FORMATTING
 // ============================================================================
 String getFormattedTime12HNoSec() {
-  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "08:45 AM";
+  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "07:30 PM";
 
   int hour12 = nowRTC.hour() % 12;
 
@@ -1418,7 +1418,7 @@ String getDayOfWeekNameUpper() {
 }
 
 String getFormattedISO8601Timestamp() {
-  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "2026-10-12T08:45:00+05:30";
+  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "2026-10-12T19:30:00+05:30";
 
   int m = constrain((int)nowRTC.month(), 1, 12);
   int d = constrain((int)nowRTC.day(), 1, 31);
