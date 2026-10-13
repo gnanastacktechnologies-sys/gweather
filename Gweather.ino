@@ -242,6 +242,9 @@ int historySampleCount = 0;
 unsigned long lastNtpSyncTime = 0;
 const unsigned long NTP_SYNC_INTERVAL = 3600000; // Check/refresh NTP sync every 1 hour
 
+unsigned long lastSdSyncTime = 0;
+const unsigned long SD_SYNC_INTERVAL = 30000; // MicroSD offline backlog sync check every 30s
+
 // Sensor Initialization & Glitch Flags (Zero-Boot Protection)
 bool hasValidTempReading = false;
 bool hasValidHumReading = false;
@@ -381,7 +384,10 @@ void loop() {
     updateTrends();
   }
 
-  // 5. Intelligent SD Card Logging (5-Minute Mathematical Average OR Instant Event Trigger)
+  // 5. Intelligent SD Card Logging:
+  // When OFFLINE (hotspot disconnected): record high-resolution 1-minute (60s) logs to capture every minute.
+  // When ONLINE (hotspot connected): record 5-minute mathematical rolling averages.
+  unsigned long activeSdLogInterval = (WiFi.status() == WL_CONNECTED) ? SD_LOG_INTERVAL : 60000;
   bool isEvent = checkSDEventTrigger();
   if (isEvent) {
     lastSdLogTime = currentMillis;
@@ -391,9 +397,9 @@ void loop() {
       lastTelemetryTime = currentMillis;
       handleTelemetryUpload();
     }
-  } else if (currentMillis - lastSdLogTime >= SD_LOG_INTERVAL) {
+  } else if (currentMillis - lastSdLogTime >= activeSdLogInterval) {
     lastSdLogTime = currentMillis;
-    logToSDCard("AVG");
+    logToSDCard(WiFi.status() == WL_CONNECTED ? "AVG" : "OFFLINE");
   }
 
   // 6. TFT Page Auto-Rotation (Smart Night Display Optimization)
@@ -420,7 +426,16 @@ void loop() {
     handleTelemetryUpload();
   }
 
-  // 9. Periodic Non-Blocking NTP Internet Time Sync (Hourly when connected)
+  // 9. Dedicated Non-Blocking MicroSD Offline Backlog Sync Engine
+  // Runs every 30s when connected, offset from live telemetry by >6s to ensure 100% free heap for TLS
+  if (WiFi.status() == WL_CONNECTED && sdAvailable) {
+    if (currentMillis - lastSdSyncTime >= SD_SYNC_INTERVAL && (currentMillis - lastTelemetryTime > 6000)) {
+      lastSdSyncTime = currentMillis;
+      syncOfflineSDRecords();
+    }
+  }
+
+  // 10. Periodic Non-Blocking NTP Internet Time Sync (Hourly when connected)
   if (WiFi.status() == WL_CONNECTED && (currentMillis - lastNtpSyncTime >= NTP_SYNC_INTERVAL || lastNtpSyncTime == 0)) {
     lastNtpSyncTime = currentMillis;
     syncNTPtoRTC();
@@ -569,6 +584,10 @@ void initPeripherals() {
   Serial.println("[Hardware] ST7735 TFT Display initialized.");
 
   // 6. MicroSD Card (Shared SPI)
+  digitalWrite(TFT_CS, HIGH);
+  digitalWrite(SD_CS, HIGH);
+  delay(15);
+
   if (SD.begin(SD_CS, SPI, 4000000)) {
     sdAvailable = true;
     Serial.println("[Hardware] MicroSD Card initialized successfully.");
@@ -591,6 +610,7 @@ void initPeripherals() {
   } else {
     Serial.println("[Hardware Warning] MicroSD Card initialization failed.");
   }
+  digitalWrite(SD_CS, HIGH);
 }
 
 // ============================================================================
@@ -610,6 +630,8 @@ void handleWiFiNonBlocking() {
       // Trigger instant telemetry upload upon Wi-Fi connection
       lastTelemetryTime = millis();
       handleTelemetryUpload();
+      // Pre-schedule offline SD backlog sync check 7s later to let telemetry TLS socket fully terminate
+      lastSdSyncTime = millis() - (SD_SYNC_INTERVAL - 7000);
     }
   } else {
     if (wifiWasConnected) {
@@ -1057,7 +1079,7 @@ void logToSDCard(const char* logType) {
   float logRainProb = weather.rainProbability;
   float logBat = weather.batteryVoltage;
 
-  if (strcmp(logType, "AVG") == 0 && sdAggregator.sampleCount > 0) {
+  if ((strcmp(logType, "AVG") == 0 || strcmp(logType, "OFFLINE") == 0) && sdAggregator.sampleCount > 0) {
     logTemp = sdAggregator.sumTemp / (double)sdAggregator.sampleCount;
     logHum = sdAggregator.sumHum / (double)sdAggregator.sampleCount;
     logPress = sdAggregator.sumPress / (double)sdAggregator.sampleCount;
@@ -1674,9 +1696,6 @@ void handleTelemetryUpload() {
   }
 
   http.end();
-
-  // Trigger non-blocking offline SD edge backlog sync
-  syncOfflineSDRecords();
 }
 
 // ============================================================================
@@ -1687,7 +1706,7 @@ void syncOfflineSDRecords() {
     return;
   }
 
-  // Isolate SPI for SD card
+  // Isolate SPI bus specifically for MicroSD Card
   digitalWrite(TFT_CS, HIGH);
   digitalWrite(SD_CS, LOW);
 
@@ -1713,31 +1732,36 @@ void syncOfflineSDRecords() {
   }
 
   unsigned long fileSize = logFile.size();
+
+  // Reset pointer if file was truncated or pointer is out of bounds
+  if (lastSyncedPos > fileSize) {
+    lastSyncedPos = 0;
+  }
+
   if (lastSyncedPos >= fileSize) {
     logFile.close();
     digitalWrite(SD_CS, HIGH);
-    return; // All caught up
+    return; // All offline records caught up!
   }
 
   // If starting from beginning, skip the CSV header line
   if (lastSyncedPos == 0) {
     logFile.readStringUntil('\n');
     lastSyncedPos = logFile.position();
-  } else {
-    logFile.seek(lastSyncedPos);
   }
 
   logFile.close();
   digitalWrite(SD_CS, HIGH);
 
-  WiFiClientSecure client;
-  client.setInsecure();
-  HTTPClient http;
-  http.setTimeout(8000);
-  String batchUrl = String(SERVER_URL) + "/batch";
+  Serial.print("[SD Sync Engine] Backlog detected! File size: ");
+  Serial.print(fileSize);
+  Serial.print(" bytes | Synced pos: ");
+  Serial.print(lastSyncedPos);
+  Serial.println(" bytes. Beginning cloud sync...");
 
+  String batchUrl = String(SERVER_URL) + "/batch";
   int totalSyncedThisSession = 0;
-  const int MAX_SESSION_RECORDS = 100; // Rapid catch-up of up to 100 records per session
+  const int MAX_SESSION_RECORDS = 60; // Sync up to 60 records per session
 
   while (WiFi.status() == WL_CONNECTED && totalSyncedThisSession < MAX_SESSION_RECORDS) {
     digitalWrite(TFT_CS, HIGH);
@@ -1752,7 +1776,7 @@ void syncOfflineSDRecords() {
     if (lastSyncedPos >= logFile.size()) {
       logFile.close();
       digitalWrite(SD_CS, HIGH);
-      break; // All offline records caught up!
+      break; // All caught up
     }
 
     logFile.seek(lastSyncedPos);
@@ -1761,7 +1785,7 @@ void syncOfflineSDRecords() {
     int recordCount = 0;
     unsigned long newPos = lastSyncedPos;
 
-    while (logFile.available() && recordCount < 15) {
+    while (logFile.available() && recordCount < 10) {
       String line = logFile.readStringUntil('\n');
       line.trim();
       if (line.length() < 10) continue;
@@ -1823,7 +1847,7 @@ void syncOfflineSDRecords() {
               batchJson += ",\"batteryVoltage\":" + String(vVal, 2) + ",\"isUsbPower\":false";
             }
           }
-        } else if (tag == "AVG") {
+        } else if (tag == "AVG" || tag == "OFFLINE") {
           logType = "sd_average";
           int prevComma = line.lastIndexOf(',', lastComma - 1);
           if (prevComma > c10) {
@@ -1854,10 +1878,15 @@ void syncOfflineSDRecords() {
 
     if (recordCount == 0) break;
 
-    // Send HTTP POST batch
-    if (http.begin(client, batchUrl)) {
-      http.addHeader("Content-Type", "application/json");
-      int code = http.POST(batchJson);
+    // Send HTTP POST batch with fresh isolated TLS client
+    WiFiClientSecure batchClient;
+    batchClient.setInsecure();
+    HTTPClient batchHttp;
+    batchHttp.setTimeout(10000);
+
+    if (batchHttp.begin(batchClient, batchUrl)) {
+      batchHttp.addHeader("Content-Type", "application/json");
+      int code = batchHttp.POST(batchJson);
 
       if (code == 200 || code == 201) {
         lastSyncedPos = newPos;
@@ -1873,17 +1902,18 @@ void syncOfflineSDRecords() {
         }
         digitalWrite(SD_CS, HIGH);
 
-        Serial.print("[SD Sync] Batch uploaded: ");
+        Serial.print("[SD Sync Engine] Batch uploaded: ");
         Serial.print(recordCount);
         Serial.println(" records.");
       } else {
         Serial.print("[SD Sync Warning] Server returned HTTP ");
         Serial.println(code);
-        http.end();
+        batchHttp.end();
         break;
       }
-      http.end();
+      batchHttp.end();
     } else {
+      Serial.println("[SD Sync Error] Failed to connect to /batch endpoint");
       break;
     }
 
