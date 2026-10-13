@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Header from './components/Header';
+import Sidebar from './components/Sidebar';
 import WeatherCard from './components/WeatherCard';
 import RainCard from './components/RainCard';
 import TrendCard from './components/TrendCard';
@@ -19,6 +20,8 @@ export default function App() {
 
   const [isOnline, setIsOnline] = useState(false);
   const [isSdSyncOpen, setIsSdSyncOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState('today-status');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdatedFormatted, setLastUpdatedFormatted] = useState('');
@@ -85,6 +88,59 @@ export default function App() {
     setFilterDays(days);
     fetchTelemetry(days);
   };
+
+  // Prevent background scrolling when sidebar or modal is open
+  useEffect(() => {
+    if (isSidebarOpen || isSdSyncOpen) {
+      document.body.classList.add('scroll-locked');
+    } else {
+      document.body.classList.remove('scroll-locked');
+    }
+    return () => {
+      document.body.classList.remove('scroll-locked');
+    };
+  }, [isSidebarOpen, isSdSyncOpen]);
+
+  // Smooth scroll to targeted section
+  const handleNavigateSection = (sectionId) => {
+    setActiveSection(sectionId);
+    const el = document.getElementById(sectionId);
+    if (el) {
+      const headerOffset = 95;
+      const elementPosition = el.getBoundingClientRect().top;
+      const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+      window.scrollTo({
+        top: offsetPosition,
+        behavior: 'smooth'
+      });
+    }
+  };
+
+  // Scroll spy to dynamically track active section in viewport
+  useEffect(() => {
+    const sectionIds = [
+      'today-status',
+      'power-engine',
+      'hour-trend',
+      'weather-calendar',
+      'live-activity',
+      'telemetry-log'
+    ];
+
+    const handleScroll = () => {
+      const scrollPos = window.scrollY + 130;
+      for (let i = sectionIds.length - 1; i >= 0; i--) {
+        const el = document.getElementById(sectionIds[i]);
+        if (el && el.offsetTop <= scrollPos) {
+          setActiveSection(sectionIds[i]);
+          break;
+        }
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   useEffect(() => {
     fetchTelemetry(filterDays);
@@ -184,14 +240,28 @@ export default function App() {
 
   return (
     <div className="app-container">
+      {/* 1. Fixed Topbar Navigation */}
       <Header
         isOnline={isOnline}
         deviceId={weatherData?.deviceId}
         onOpenSdSync={() => setIsSdSyncOpen(true)}
         dayPhase={atmosphere.phase}
         dayPhaseIcon={atmosphere.phaseIcon}
+        onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
+        isSidebarOpen={isSidebarOpen}
       />
 
+      {/* 2. Slide-out Navigation Drawer for 6 Engines */}
+      <Sidebar
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        activeSection={activeSection}
+        onNavigate={handleNavigateSection}
+        weatherData={weatherData}
+        onOpenSdSync={() => setIsSdSyncOpen(true)}
+      />
+
+      {/* 3. Main Scrollable Dashboard Content */}
       <main className="dashboard-content">
         {loading ? (
           <div className="state-container loading-state">
@@ -207,133 +277,189 @@ export default function App() {
           </div>
         ) : (
           <div className="dashboard-grid">
-            {/* Master Hero Weather Banner */}
-            <div className="hero-weather-card">
-              <div className="hero-main-row">
+            {/* SECTION 1: TODAY STATUS */}
+            <section id="today-status" className="dashboard-section">
+              <div className="section-header-tag">
+                <span className="section-num-chip">1</span>
                 <div>
-                  <div className="hero-title">Live Temperature</div>
-                  <div className="hero-temp-block">
-                    <span className="hero-temp-val">{weatherData?.temperature !== undefined ? weatherData.temperature : '--'}</span>
-                    <span className="hero-temp-unit">°C</span>
+                  <h2 className="section-tag-title">Today Status & Atmosphere</h2>
+                  <span className="section-tag-desc">DHT22 Ambient Metrics, Barometric Pressure & Rain Possibility</span>
+                </div>
+              </div>
+
+              {/* Master Hero Weather Banner */}
+              <div className="hero-weather-card">
+                <div className="hero-main-row">
+                  <div>
+                    <div className="hero-title">Live Temperature</div>
+                    <div className="hero-temp-block">
+                      <span className="hero-temp-val">{weatherData?.temperature !== undefined ? weatherData.temperature : '--'}</span>
+                      <span className="hero-temp-unit">°C</span>
+                    </div>
+                    <div className="hero-atmosphere-tags">
+                      <span className="hero-tag-chip chip-phase">
+                        <span>{atmosphere.phaseIcon}</span>
+                        <span>{atmosphere.phase}</span>
+                      </span>
+                      <span className="hero-tag-chip chip-sky">
+                        <span>{atmosphere.skyIcon}</span>
+                        <span>{atmosphere.sky}</span>
+                      </span>
+                    </div>
                   </div>
-                  <div className="hero-atmosphere-tags">
-                    <span className="hero-tag-chip chip-phase">
-                      <span>{atmosphere.phaseIcon}</span>
-                      <span>{atmosphere.phase}</span>
-                    </span>
-                    <span className="hero-tag-chip chip-sky">
+
+                  <div className="hero-badges-col">
+                    <div className={`hero-status-pill ${getRainStatusClass(weatherData?.rainStatus)}`}>
                       <span>{atmosphere.skyIcon}</span>
-                      <span>{atmosphere.sky}</span>
-                    </span>
+                      <span>{weatherData?.rainStatus || 'DRY'}</span>
+                    </div>
+                    <div className="hero-sky-subtext">{atmosphere.description}</div>
                   </div>
                 </div>
 
-                <div className="hero-badges-col">
-                  <div className={`hero-status-pill ${getRainStatusClass(weatherData?.rainStatus)}`}>
-                    <span>{atmosphere.skyIcon}</span>
-                    <span>{weatherData?.rainStatus || 'DRY'}</span>
+                <div className="hero-sub-stats">
+                  <div className="sub-stat-box">
+                    <span className="sub-lbl">Humidity</span>
+                    <span className="sub-val">{weatherData?.humidity !== undefined ? `${weatherData.humidity}%` : '--'}</span>
                   </div>
-                  <div className="hero-sky-subtext">{atmosphere.description}</div>
+                  <div className="sub-stat-box">
+                    <span className="sub-lbl">Pressure</span>
+                    <span className="sub-val">{weatherData?.pressure !== undefined ? `${weatherData.pressure} hPa` : '--'}</span>
+                  </div>
+                  <div className="sub-stat-box">
+                    <span className="sub-lbl">Ambient Light</span>
+                    <span className="sub-val">{weatherData?.light !== undefined ? `${weatherData.light} lx` : '--'}</span>
+                  </div>
+                  <div className="sub-stat-box">
+                    <span className="sub-lbl">UV Index</span>
+                    <span className="sub-val text-amber">{weatherData?.uvIndex !== undefined ? `${weatherData.uvIndex} UVI` : '0 UVI'}</span>
+                  </div>
+                  <div className="sub-stat-box">
+                    <span className="sub-lbl">Rain Chance</span>
+                    <span className="sub-val">{weatherData?.rainProbability !== undefined ? `${weatherData.rainProbability}%` : '--'}</span>
+                  </div>
                 </div>
               </div>
 
-              <div className="hero-sub-stats">
-                <div className="sub-stat-box">
-                  <span className="sub-lbl">Humidity</span>
-                  <span className="sub-val">{weatherData?.humidity !== undefined ? `${weatherData.humidity}%` : '--'}</span>
-                </div>
-                <div className="sub-stat-box">
-                  <span className="sub-lbl">Pressure</span>
-                  <span className="sub-val">{weatherData?.pressure !== undefined ? `${weatherData.pressure} hPa` : '--'}</span>
-                </div>
-                <div className="sub-stat-box">
-                  <span className="sub-lbl">Ambient Light</span>
-                  <span className="sub-val">{weatherData?.light !== undefined ? `${weatherData.light} lx` : '--'}</span>
-                </div>
-                <div className="sub-stat-box">
-                  <span className="sub-lbl">UV Index</span>
-                  <span className="sub-val text-amber">{weatherData?.uvIndex !== undefined ? `${weatherData.uvIndex} UVI` : '0 UVI'}</span>
-                </div>
-                <div className="sub-stat-box">
-                  <span className="sub-lbl">Rain Chance</span>
-                  <span className="sub-val">{weatherData?.rainProbability !== undefined ? `${weatherData.rainProbability}%` : '--'}</span>
+              {/* Core Weather Metrics Cards */}
+              <div className="metrics-grid">
+                <WeatherCard
+                  title="Humidity"
+                  value={weatherData?.humidity}
+                  unit="%"
+                  subtitle="DHT22 Relative Humidity"
+                />
+
+                <WeatherCard
+                  title="Pressure"
+                  value={weatherData?.pressure}
+                  unit="hPa"
+                  subtitle="BMP280 Barometric Sensor"
+                />
+
+                <WeatherCard
+                  title="Ambient Light"
+                  value={weatherData?.light}
+                  unit="lx"
+                  trend={atmosphere.lightTag}
+                  subtitle="BH1750 Light Intensity"
+                />
+
+                <WeatherCard
+                  title="UV Index"
+                  value={weatherData?.uvIndex !== undefined ? weatherData.uvIndex : 0}
+                  unit="UVI"
+                  trend={
+                    (weatherData?.uvIndex || 0) < 3 ? 'LOW' :
+                    (weatherData?.uvIndex || 0) < 6 ? 'MODERATE' :
+                    (weatherData?.uvIndex || 0) < 8 ? 'HIGH' :
+                    (weatherData?.uvIndex || 0) < 11 ? 'VERY HIGH' : 'EXTREME'
+                  }
+                  subtitle="GUVA-S12SD Solar Radiation"
+                />
+              </div>
+
+              {/* Rain Status & V2 Intelligence */}
+              <RainCard
+                rainProbability={weatherData?.rainProbability || 0}
+                rainStatus={weatherData?.rainStatus || 'DRY'}
+              />
+            </section>
+
+            {/* SECTION 2: POWER & HARDWARE EFFICIENCY ENGINE */}
+            <section id="power-engine" className="dashboard-section">
+              <div className="section-header-tag">
+                <span className="section-num-chip">2</span>
+                <div>
+                  <h2 className="section-tag-title">Power & Hardware Efficiency Engine</h2>
+                  <span className="section-tag-desc">Real-time Watts, Supply Voltage, Energy Wh & Runtime Hours</span>
                 </div>
               </div>
-            </div>
-
-            {/* Core Weather Metrics Cards */}
-            <div className="metrics-grid">
-              <WeatherCard
-                title="Humidity"
-                value={weatherData?.humidity}
-                unit="%"
-                subtitle="DHT22 Relative Humidity"
+              <PowerCard
+                batteryVoltage={weatherData?.batteryVoltage}
+                isUsbPower={weatherData?.isUsbPower}
+                estimatedPowerW={weatherData?.estimatedPowerW}
+                estimatedEnergyWh={weatherData?.estimatedEnergyWh}
+                uptimeHours={weatherData?.uptimeHours}
               />
+            </section>
 
-              <WeatherCard
-                title="Pressure"
-                value={weatherData?.pressure}
-                unit="hPa"
-                subtitle="BMP280 Barometric Sensor"
+            {/* SECTION 3: HOUR TREND */}
+            <section id="hour-trend" className="dashboard-section">
+              <div className="section-header-tag">
+                <span className="section-num-chip">3</span>
+                <div>
+                  <h2 className="section-tag-title">Hour Trend Analysis</h2>
+                  <span className="section-tag-desc">Sliding Multi-Sample Meteorological Directional Vectors</span>
+                </div>
+              </div>
+              <TrendCard
+                pressureTrend={weatherData?.pressureTrend || 'STEADY'}
+                temperatureTrend={weatherData?.temperatureTrend || 'STEADY'}
+                humidityTrend={weatherData?.humidityTrend || 'STEADY'}
               />
+            </section>
 
-              <WeatherCard
-                title="Ambient Light"
-                value={weatherData?.light}
-                unit="lx"
-                trend={atmosphere.lightTag}
-                subtitle="BH1750 Light Intensity"
+            {/* SECTION 4: WEATHER CALENDAR */}
+            <section id="weather-calendar" className="dashboard-section">
+              <div className="section-header-tag">
+                <span className="section-num-chip">4</span>
+                <div>
+                  <h2 className="section-tag-title">Weather Calendar Matrix</h2>
+                  <span className="section-tag-desc">Monthly Agro-Climate History & Daily Aggregate Bounds</span>
+                </div>
+              </div>
+              <MonthlyCalendar />
+            </section>
+
+            {/* SECTION 5: LIVE STATION ACTIVITY */}
+            <section id="live-activity" className="dashboard-section">
+              <div className="section-header-tag">
+                <span className="section-num-chip">5</span>
+                <div>
+                  <h2 className="section-tag-title">Live Station Activity Streams</h2>
+                  <span className="section-tag-desc">Dual Hardware Connection & Telemetry Heartbeats</span>
+                </div>
+              </div>
+              <RecentActivities />
+            </section>
+
+            {/* SECTION 6: LOG */}
+            <section id="telemetry-log" className="dashboard-section">
+              <div className="section-header-tag">
+                <span className="section-num-chip">6</span>
+                <div>
+                  <h2 className="section-tag-title">Telemetry Audit Log</h2>
+                  <span className="section-tag-desc">Historical Transmissions, Source Badges & CSV Data Export</span>
+                </div>
+              </div>
+              <HistoryCard
+                historyData={historyData}
+                summary={historySummary}
+                selectedFilter={selectedFilter}
+                onFilterChange={handleFilterChange}
               />
-
-              <WeatherCard
-                title="UV Index"
-                value={weatherData?.uvIndex !== undefined ? weatherData.uvIndex : 0}
-                unit="UVI"
-                trend={
-                  (weatherData?.uvIndex || 0) < 3 ? 'LOW' :
-                  (weatherData?.uvIndex || 0) < 6 ? 'MODERATE' :
-                  (weatherData?.uvIndex || 0) < 8 ? 'HIGH' :
-                  (weatherData?.uvIndex || 0) < 11 ? 'VERY HIGH' : 'EXTREME'
-                }
-                subtitle="GUVA-S12SD Solar Radiation"
-              />
-            </div>
-
-            {/* Rain Status & V2 Intelligence */}
-            <RainCard
-              rainProbability={weatherData?.rainProbability || 0}
-              rainStatus={weatherData?.rainStatus || 'DRY'}
-            />
-
-            {/* Power Monitor & System Health */}
-            <PowerCard
-              batteryVoltage={weatherData?.batteryVoltage}
-              isUsbPower={weatherData?.isUsbPower}
-              estimatedPowerW={weatherData?.estimatedPowerW}
-              estimatedEnergyWh={weatherData?.estimatedEnergyWh}
-              uptimeHours={weatherData?.uptimeHours}
-            />
-
-            {/* Sensor Trends */}
-            <TrendCard
-              pressureTrend={weatherData?.pressureTrend || 'STEADY'}
-              temperatureTrend={weatherData?.temperatureTrend || 'STEADY'}
-              humidityTrend={weatherData?.humidityTrend || 'STEADY'}
-            />
-
-            {/* Monthly Calendar View */}
-            <MonthlyCalendar />
-
-            {/* Split Recent Activity Stream */}
-            <RecentActivities />
-
-            {/* Historical Telemetry Table */}
-            <HistoryCard
-              historyData={historyData}
-              summary={historySummary}
-              selectedFilter={selectedFilter}
-              onFilterChange={handleFilterChange}
-            />
+            </section>
 
             {/* Footer with Copyright */}
             <footer className="dashboard-footer">
@@ -348,6 +474,7 @@ export default function App() {
           </div>
         )}
       </main>
+
       <SdSyncModal
         isOpen={isSdSyncOpen}
         onClose={() => setIsSdSyncOpen(false)}

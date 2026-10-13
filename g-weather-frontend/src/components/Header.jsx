@@ -1,8 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import StatusBadge from './StatusBadge';
-import { ClockIcon, BoltIcon, SdCardIcon } from './Icons';
+import { ClockIcon, BoltIcon, SdCardIcon, MenuIcon } from './Icons';
 
-export default function Header({ isOnline, deviceId, onOpenSdSync, dayPhase, dayPhaseIcon }) {
+export default function Header({
+  isOnline,
+  deviceId,
+  onOpenSdSync,
+  dayPhase,
+  dayPhaseIcon,
+  onToggleSidebar,
+  isSidebarOpen
+}) {
   const [timeStr, setTimeStr] = useState('');
 
   useEffect(() => {
@@ -16,17 +24,29 @@ export default function Header({ isOnline, deviceId, onOpenSdSync, dayPhase, day
   }, []);
 
   return (
-    <header className="app-header glass-header">
-      <div className="header-brand">
-        <div className="logo-glow-wrapper">
-          <img src="/logo.jpg" alt="G-WEATHER Logo" className="brand-logo" />
-        </div>
-        <div className="brand-text">
-          <div className="brand-title-row">
-            <h1 className="brand-title">G-WEATHER</h1>
-            <span className="version-chip">V3.2 ULTIMATE</span>
+    <header className="app-header glass-header fixed-topbar">
+      <div className="header-left-group">
+        <button
+          className={`sidebar-toggle-btn ${isSidebarOpen ? 'active' : ''}`}
+          onClick={onToggleSidebar}
+          title="Toggle Navigation Sidebar (6 Engines)"
+          aria-label="Toggle Navigation Sidebar"
+        >
+          <MenuIcon className="menu-svg text-cyan" />
+          <span className="menu-btn-text">MENU</span>
+        </button>
+
+        <div className="header-brand">
+          <div className="logo-glow-wrapper">
+            <img src="/logo.jpg" alt="G-WEATHER Logo" className="brand-logo" />
           </div>
-          <span className="brand-subtitle">Smart Village Weather Telemetry Station</span>
+          <div className="brand-text">
+            <div className="brand-title-row">
+              <h1 className="brand-title">G-WEATHER</h1>
+              <span className="version-chip">V3.2 ULTIMATE</span>
+            </div>
+            <span className="brand-subtitle">Smart Village Weather Telemetry Station</span>
+          </div>
         </div>
       </div>
 
