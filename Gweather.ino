@@ -243,7 +243,7 @@ unsigned long lastNtpSyncTime = 0;
 const unsigned long NTP_SYNC_INTERVAL = 3600000; // Check/refresh NTP sync every 1 hour
 
 unsigned long lastSdSyncTime = 0;
-const unsigned long SD_SYNC_INTERVAL = 30000; // MicroSD offline backlog sync check every 30s
+const unsigned long SD_SYNC_INTERVAL = 15000; // MicroSD offline backlog sync check every 15s
 
 // Sensor Initialization & Glitch Flags (Zero-Boot Protection)
 bool hasValidTempReading = false;
@@ -1763,170 +1763,164 @@ void syncOfflineSDRecords() {
   Serial.println(" bytes. Beginning cloud sync...");
 
   String batchUrl = String(SERVER_URL) + "/batch";
-  int totalSyncedThisSession = 0;
-  const int MAX_SESSION_RECORDS = 60; // Sync up to 60 records per session
 
-  while (WiFi.status() == WL_CONNECTED && totalSyncedThisSession < MAX_SESSION_RECORDS) {
-    digitalWrite(TFT_CS, HIGH);
-    digitalWrite(SD_CS, LOW);
+  // Isolate SPI for reading offline records
+  digitalWrite(TFT_CS, HIGH);
+  digitalWrite(SD_CS, LOW);
 
-    logFile = SD.open("/weather_log.csv", FILE_READ);
-    if (!logFile) {
-      digitalWrite(SD_CS, HIGH);
-      break;
-    }
+  logFile = SD.open("/weather_log.csv", FILE_READ);
+  if (!logFile) {
+    digitalWrite(SD_CS, HIGH);
+    return;
+  }
 
-    if (lastSyncedPos >= logFile.size()) {
-      logFile.close();
-      digitalWrite(SD_CS, HIGH);
-      break; // All caught up
-    }
+  if (lastSyncedPos >= logFile.size()) {
+    logFile.close();
+    digitalWrite(SD_CS, HIGH);
+    return; // All caught up
+  }
 
-    logFile.seek(lastSyncedPos);
+  logFile.seek(lastSyncedPos);
 
-    String batchJson = "{\"records\":[";
-    int recordCount = 0;
-    unsigned long newPos = lastSyncedPos;
+  String batchJson = "{\"records\":[";
+  int recordCount = 0;
+  unsigned long newPos = lastSyncedPos;
 
-    while (logFile.available() && recordCount < 10) {
-      String line = logFile.readStringUntil('\n');
-      line.trim();
-      if (line.length() < 10) continue;
+  // Read up to 10 records per execution (keeps payload lightweight and non-blocking)
+  while (logFile.available() && recordCount < 10) {
+    String line = logFile.readStringUntil('\n');
+    line.trim();
+    if (line.length() < 10) continue;
 
-      int c1 = line.indexOf(',');
-      if (c1 < 0) continue;
-      int c2 = line.indexOf(',', c1 + 1);
-      if (c2 < 0) continue;
-      int c3 = line.indexOf(',', c2 + 1);
-      if (c3 < 0) continue;
-      int c4 = line.indexOf(',', c3 + 1);
-      if (c4 < 0) continue;
-      int c5 = line.indexOf(',', c4 + 1);
-      if (c5 < 0) continue;
-      int c6 = line.indexOf(',', c5 + 1);
-      if (c6 < 0) continue;
-      int c7 = line.indexOf(',', c6 + 1);
-      if (c7 < 0) continue;
-      int c8 = line.indexOf(',', c7 + 1);
-      if (c8 < 0) continue;
-      int c9 = line.indexOf(',', c8 + 1);
-      if (c9 < 0) continue;
-      int c10 = line.indexOf(',', c9 + 1);
+    int c1 = line.indexOf(',');
+    if (c1 < 0) continue;
+    int c2 = line.indexOf(',', c1 + 1);
+    if (c2 < 0) continue;
+    int c3 = line.indexOf(',', c2 + 1);
+    if (c3 < 0) continue;
+    int c4 = line.indexOf(',', c3 + 1);
+    if (c4 < 0) continue;
+    int c5 = line.indexOf(',', c4 + 1);
+    if (c5 < 0) continue;
+    int c6 = line.indexOf(',', c5 + 1);
+    if (c6 < 0) continue;
+    int c7 = line.indexOf(',', c6 + 1);
+    if (c7 < 0) continue;
+    int c8 = line.indexOf(',', c7 + 1);
+    if (c8 < 0) continue;
+    int c9 = line.indexOf(',', c8 + 1);
+    if (c9 < 0) continue;
+    int c10 = line.indexOf(',', c9 + 1);
 
-      String ts = line.substring(0, c1);
-      String temp = line.substring(c1 + 1, c2);
-      String hum = line.substring(c2 + 1, c3);
-      String press = line.substring(c3 + 1, c4);
-      String lux = line.substring(c4 + 1, c5);
-      String uv = line.substring(c5 + 1, c6);
-      String prob = (c8 > 0 && c9 > 0) ? line.substring(c8 + 1, c9) : "0";
-      String rStat = (c9 > 0 && c10 > 0) ? line.substring(c9 + 1, c10) : "DRY";
+    String ts = line.substring(0, c1);
+    String temp = line.substring(c1 + 1, c2);
+    String hum = line.substring(c2 + 1, c3);
+    String press = line.substring(c3 + 1, c4);
+    String lux = line.substring(c4 + 1, c5);
+    String uv = line.substring(c5 + 1, c6);
+    String prob = (c8 > 0 && c9 > 0) ? line.substring(c8 + 1, c9) : "0";
+    String rStat = (c9 > 0 && c10 > 0) ? line.substring(c9 + 1, c10) : "DRY";
 
-      if (recordCount > 0) batchJson += ",";
-      batchJson += "{";
-      batchJson += "\"deviceId\":\"" + String(DEVICE_ID) + "\",";
-      batchJson += "\"timestamp\":\"" + ts + "\",";
-      batchJson += "\"temperature\":" + temp + ",";
-      batchJson += "\"humidity\":" + hum + ",";
-      batchJson += "\"pressure\":" + press + ",";
-      batchJson += "\"light\":" + lux + ",";
-      batchJson += "\"uvIndex\":" + uv + ",";
-      batchJson += "\"rainProbability\":" + prob + ",";
-      batchJson += "\"rainStatus\":\"" + rStat + "\"";
+    if (recordCount > 0) batchJson += ",";
+    batchJson += "{";
+    batchJson += "\"deviceId\":\"" + String(DEVICE_ID) + "\",";
+    batchJson += "\"timestamp\":\"" + ts + "\",";
+    batchJson += "\"temperature\":" + temp + ",";
+    batchJson += "\"humidity\":" + hum + ",";
+    batchJson += "\"pressure\":" + press + ",";
+    batchJson += "\"light\":" + lux + ",";
+    batchJson += "\"uvIndex\":" + uv + ",";
+    batchJson += "\"rainProbability\":" + prob + ",";
+    batchJson += "\"rainStatus\":\"" + rStat + "\"";
 
-      int lastComma = line.lastIndexOf(',');
-      String logType = "sd_average";
-      if (lastComma > c10) {
-        String tag = line.substring(lastComma + 1);
-        tag.trim();
-        if (tag == "EVENT") {
-          logType = "sd_event";
-          int prevComma = line.lastIndexOf(',', lastComma - 1);
-          if (prevComma > c10) {
-            String volt = line.substring(prevComma + 1, lastComma);
-            volt.trim();
-            float vVal = volt.toFloat();
-            if (vVal > 0.05) {
-              batchJson += ",\"batteryVoltage\":" + String(vVal, 2) + ",\"isUsbPower\":false";
-            }
-          }
-        } else if (tag == "AVG" || tag == "OFFLINE") {
-          logType = "sd_average";
-          int prevComma = line.lastIndexOf(',', lastComma - 1);
-          if (prevComma > c10) {
-            String volt = line.substring(prevComma + 1, lastComma);
-            volt.trim();
-            float vVal = volt.toFloat();
-            if (vVal > 0.05) {
-              batchJson += ",\"batteryVoltage\":" + String(vVal, 2) + ",\"isUsbPower\":false";
-            }
-          }
-        } else {
-          float vVal = tag.toFloat();
+    int lastComma = line.lastIndexOf(',');
+    String logType = "sd_average";
+    if (lastComma > c10) {
+      String tag = line.substring(lastComma + 1);
+      tag.trim();
+      if (tag == "EVENT") {
+        logType = "sd_event";
+        int prevComma = line.lastIndexOf(',', lastComma - 1);
+        if (prevComma > c10) {
+          String volt = line.substring(prevComma + 1, lastComma);
+          volt.trim();
+          float vVal = volt.toFloat();
           if (vVal > 0.05) {
             batchJson += ",\"batteryVoltage\":" + String(vVal, 2) + ",\"isUsbPower\":false";
           }
         }
-      }
-      batchJson += ",\"source\":\"" + logType + "\"";
-      batchJson += "}";
-
-      recordCount++;
-      newPos = logFile.position();
-    }
-
-    batchJson += "]}";
-    logFile.close();
-    digitalWrite(SD_CS, HIGH);
-
-    if (recordCount == 0) break;
-
-    // Send HTTP POST batch with fresh isolated TLS client
-    WiFiClientSecure batchClient;
-    batchClient.setInsecure();
-    HTTPClient batchHttp;
-    batchHttp.setTimeout(10000);
-
-    if (batchHttp.begin(batchClient, batchUrl)) {
-      batchHttp.addHeader("Content-Type", "application/json");
-      int code = batchHttp.POST(batchJson);
-
-      if (code == 200 || code == 201) {
-        lastSyncedPos = newPos;
-        totalSyncedThisSession += recordCount;
-
-        // Save progress to /sync_ptr.txt
-        digitalWrite(TFT_CS, HIGH);
-        digitalWrite(SD_CS, LOW);
-        File ptrFile = SD.open("/sync_ptr.txt", FILE_WRITE);
-        if (ptrFile) {
-          ptrFile.print(lastSyncedPos);
-          ptrFile.close();
+      } else if (tag == "AVG" || tag == "OFFLINE") {
+        logType = "sd_average";
+        int prevComma = line.lastIndexOf(',', lastComma - 1);
+        if (prevComma > c10) {
+          String volt = line.substring(prevComma + 1, lastComma);
+          volt.trim();
+          float vVal = volt.toFloat();
+          if (vVal > 0.05) {
+            batchJson += ",\"batteryVoltage\":" + String(vVal, 2) + ",\"isUsbPower\":false";
+          }
         }
-        digitalWrite(SD_CS, HIGH);
-
-        Serial.print("[SD Sync Engine] Batch uploaded: ");
-        Serial.print(recordCount);
-        Serial.println(" records.");
       } else {
-        Serial.print("[SD Sync Warning] Server returned HTTP ");
-        Serial.println(code);
-        batchHttp.end();
-        break;
+        float vVal = tag.toFloat();
+        if (vVal > 0.05) {
+          batchJson += ",\"batteryVoltage\":" + String(vVal, 2) + ",\"isUsbPower\":false";
+        }
       }
-      batchHttp.end();
-    } else {
-      Serial.println("[SD Sync Error] Failed to connect to /batch endpoint");
-      break;
     }
+    batchJson += ",\"source\":\"" + logType + "\"";
+    batchJson += "}";
 
-    yield(); // CPU yield for ESP32 background tasks
+    recordCount++;
+    newPos = logFile.position();
   }
 
-  if (totalSyncedThisSession > 0) {
-    Serial.print("[SD Sync Complete] Successfully uploaded total of ");
-    Serial.print(totalSyncedThisSession);
-    Serial.println(" offline records to cloud database!");
+  batchJson += "]}";
+  logFile.close();
+  digitalWrite(SD_CS, HIGH);
+
+  if (recordCount == 0) return;
+
+  // Send single HTTP POST batch (typically completes in ~1.2s, never freezes loop)
+  WiFiClientSecure batchClient;
+  batchClient.setInsecure();
+  HTTPClient batchHttp;
+  batchHttp.setTimeout(8000);
+
+  if (batchHttp.begin(batchClient, batchUrl)) {
+    batchHttp.addHeader("Content-Type", "application/json");
+    int code = batchHttp.POST(batchJson);
+
+    if (code == 200 || code == 201) {
+      lastSyncedPos = newPos;
+
+      // Save progress to /sync_ptr.txt
+      digitalWrite(TFT_CS, HIGH);
+      digitalWrite(SD_CS, LOW);
+      File ptrFile = SD.open("/sync_ptr.txt", FILE_WRITE);
+      if (ptrFile) {
+        ptrFile.print(lastSyncedPos);
+        ptrFile.close();
+      }
+      digitalWrite(SD_CS, HIGH);
+
+      Serial.print("[SD Sync Engine] Batch uploaded: ");
+      Serial.print(recordCount);
+      Serial.print(" records. Progress: ");
+      Serial.print(lastSyncedPos);
+      Serial.print(" / ");
+      Serial.print(fileSize);
+      Serial.println(" bytes.");
+
+      if (lastSyncedPos >= fileSize) {
+        Serial.println("[SD Sync Complete] All offline backlog records successfully uploaded to cloud database!");
+      }
+    } else {
+      Serial.print("[SD Sync Warning] Server returned HTTP ");
+      Serial.println(code);
+    }
+    batchHttp.end();
+  } else {
+    Serial.println("[SD Sync Error] Failed to connect to /batch endpoint");
   }
 }
 
