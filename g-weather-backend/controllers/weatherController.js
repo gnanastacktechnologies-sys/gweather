@@ -114,8 +114,18 @@ export const postWeatherData = async (req, res, next) => {
     }
 
     // Parse timestamp safely using IST helper
-    const parsedTimestamp = parseTimestampIST(timestamp);
+    let parsedTimestamp = parseTimestampIST(timestamp);
     const now = new Date();
+    
+    // For live telemetry packets: if the timestamp sent by hardware is missing,
+    // in the future, or more than 30 minutes in the past (e.g. RTC hardware default or drift),
+    // align it with current real-time `now` so dashboard metrics & history reflect real-time IST
+    const isLive = !req.body.source || req.body.source === 'live';
+    if (isLive) {
+      if (!parsedTimestamp || Math.abs(now.getTime() - parsedTimestamp.getTime()) > 30 * 60 * 1000) {
+        parsedTimestamp = now;
+      }
+    }
     
     // Station Connection & Session Tracking
     const OFFLINE_THRESHOLD_MS = 12 * 60 * 1000; // 12 minutes
@@ -149,7 +159,7 @@ export const postWeatherData = async (req, res, next) => {
         finalTemp = inMemoryLatest.temperature;
         finalHum = inMemoryLatest.humidity;
       } else if (mongoose.connection.readyState === 1) {
-        const lastValid = await Weather.findOne({ temperature: { $gt: 0 } }).sort({ timestamp: -1, receivedAt: -1 });
+        const lastValid = await Weather.findOne({ temperature: { $gt: 0 } }).sort({ receivedAt: -1, _id: -1 });
         if (lastValid) {
           finalTemp = lastValid.temperature;
           finalHum = lastValid.humidity;
@@ -214,17 +224,15 @@ export const getLatestWeather = async (req, res) => {
   try {
     if (mongoose.connection.readyState === 1) {
       try {
-        const now = new Date();
-        const maxTime = new Date(now.getTime() + 60000);
-        let dbRecord = await Weather.findOne({ timestamp: { $lte: maxTime } }).sort({ timestamp: -1, receivedAt: -1 });
+        // Retrieve newest reading by receivedAt (most recent real-time upload)
+        let dbRecord = await Weather.findOne().sort({ receivedAt: -1, _id: -1 });
         
         // If the latest record came from offline SD batch (which lacks power/uptime fields),
         // seamlessly preserve the hardware power & runtime metrics from the latest live telemetry record
         if (dbRecord && (!dbRecord.uptimeHours || !dbRecord.estimatedPowerW)) {
           const liveWithPower = await Weather.findOne({ 
-            uptimeHours: { $gt: 0 },
-            timestamp: { $lte: maxTime } 
-          }).sort({ timestamp: -1, receivedAt: -1 });
+            uptimeHours: { $gt: 0 }
+          }).sort({ receivedAt: -1, _id: -1 });
           
           if (liveWithPower) {
             dbRecord = dbRecord.toObject ? dbRecord.toObject() : { ...dbRecord };
@@ -242,9 +250,8 @@ export const getLatestWeather = async (req, res) => {
         // seamlessly preserve the last valid temperature and humidity readings
         if (dbRecord && dbRecord.temperature === 0 && dbRecord.humidity === 0) {
           const liveWithSensor = await Weather.findOne({ 
-            temperature: { $gt: 0 },
-            timestamp: { $lte: maxTime } 
-          }).sort({ timestamp: -1, receivedAt: -1 });
+            temperature: { $gt: 0 }
+          }).sort({ receivedAt: -1, _id: -1 });
 
           if (liveWithSensor) {
             dbRecord = dbRecord.toObject ? dbRecord.toObject() : { ...dbRecord };
@@ -299,16 +306,17 @@ export const getWeatherHistory = async (req, res) => {
 
     if (mongoose.connection.readyState === 1) {
       try {
-        const maxTime = new Date(Date.now() + 5 * 60 * 1000);
         const query = { 
-          timestamp: { $lte: maxTime },
           temperature: { $gt: 0 }
         };
         if (days > 0) {
           const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-          query.timestamp.$gte = startDate;
+          query.$or = [
+            { receivedAt: { $gte: startDate } },
+            { timestamp: { $gte: startDate } }
+          ];
         }
-        records = await Weather.find(query).sort({ timestamp: -1, receivedAt: -1 }).limit(limit);
+        records = await Weather.find(query).sort({ receivedAt: -1, _id: -1 }).limit(limit);
       } catch (dbErr) {
         console.error('[DB History Query Warning]', dbErr.message);
       }
@@ -384,6 +392,17 @@ export const getStationActivity = async (req, res) => {
       lastSeen = new Date(inMemoryLatest.receivedAt || inMemoryLatest.timestamp);
     }
 
+    let latestMetrics = inMemoryLatest;
+    if ((!lastSeen || !latestMetrics) && mongoose.connection.readyState === 1) {
+      try {
+        const latestDb = await Weather.findOne().sort({ receivedAt: -1, _id: -1 });
+        if (latestDb) {
+          if (!lastSeen) lastSeen = latestDb.receivedAt || latestDb.timestamp;
+          if (!latestMetrics) latestMetrics = latestDb;
+        }
+      } catch (e) {}
+    }
+
     let isStationOnline = false;
     let currentSessionHours = 0;
 
@@ -399,20 +418,55 @@ export const getStationActivity = async (req, res) => {
     // Category 1: Connection & Hardware Uptime events
     // Category 2: Weather Report / Telemetry sync events
     const connectionLogs = stationState.activityLogs.filter(log => log.type === 'connection' || log.type === 'system');
-    const weatherLogs = stationState.activityLogs.filter(log => log.type === 'telemetry');
+    let weatherLogs = stationState.activityLogs.filter(log => log.type === 'telemetry');
+
+    if (weatherLogs.length === 0) {
+      if (inMemoryHistory.length > 0) {
+        weatherLogs = inMemoryHistory.slice(0, 15).map((pkt, idx) => ({
+          id: 'pkt-' + idx,
+          type: 'telemetry',
+          title: 'Telemetry Received',
+          description: `Temp: ${pkt.temperature}°C, Hum: ${pkt.humidity}%, Rain: ${pkt.rainStatus || 'DRY'} (${pkt.rainProbability || 0}%)`,
+          timestamp: new Date(pkt.receivedAt || pkt.timestamp || now).toISOString(),
+          details: {
+            temperature: pkt.temperature,
+            humidity: pkt.humidity,
+            pressure: pkt.pressure,
+            rainStatus: pkt.rainStatus
+          }
+        }));
+      } else if (mongoose.connection.readyState === 1) {
+        try {
+          const recentDb = await Weather.find().sort({ receivedAt: -1, _id: -1 }).limit(15);
+          weatherLogs = recentDb.map((pkt, idx) => ({
+            id: 'db-pkt-' + (pkt._id || idx),
+            type: 'telemetry',
+            title: 'Telemetry Received',
+            description: `Temp: ${pkt.temperature}°C, Hum: ${pkt.humidity}%, Rain: ${pkt.rainStatus || 'DRY'} (${pkt.rainProbability || 0}%)`,
+            timestamp: new Date(pkt.receivedAt || pkt.timestamp).toISOString(),
+            details: {
+              temperature: pkt.temperature,
+              humidity: pkt.humidity,
+              pressure: pkt.pressure,
+              rainStatus: pkt.rainStatus
+            }
+          }));
+        } catch (e) {}
+      }
+    }
 
     return res.status(200).json({
       success: true,
       station: {
-        deviceId: inMemoryLatest?.deviceId || "GWEATHER-001",
+        deviceId: latestMetrics?.deviceId || "GWEATHER-001",
         status: isStationOnline ? "ONLINE" : "OFFLINE",
         lastSeenAt: lastSeen ? new Date(lastSeen).toISOString() : null,
         currentSessionStart: stationState.currentSessionStart ? new Date(stationState.currentSessionStart).toISOString() : null,
         uptimeHours: currentSessionHours,
-        batteryVoltage: inMemoryLatest?.batteryVoltage || 0,
-        isUsbPower: inMemoryLatest?.isUsbPower ?? true,
-        estimatedPowerW: inMemoryLatest?.estimatedPowerW || 0,
-        estimatedEnergyWh: inMemoryLatest?.estimatedEnergyWh || 0,
+        batteryVoltage: latestMetrics?.batteryVoltage || 0,
+        isUsbPower: latestMetrics?.isUsbPower ?? true,
+        estimatedPowerW: latestMetrics?.estimatedPowerW || 0,
+        estimatedEnergyWh: latestMetrics?.estimatedEnergyWh || 0,
         firmwareVersion: "V3.2 + Stage 6 Telemetry"
       },
       activities: {
@@ -427,15 +481,7 @@ export const getStationActivity = async (req, res) => {
             timestamp: lastSeen ? new Date(lastSeen).toISOString() : new Date().toISOString()
           }
         ],
-        weatherReportLogs: weatherLogs.length > 0 ? weatherLogs : (
-          inMemoryHistory.slice(0, 15).map((pkt, idx) => ({
-            id: 'pkt-' + idx,
-            type: 'telemetry',
-            title: `Weather Telemetry #${idx + 1}`,
-            description: `Temp: ${pkt.temperature}°C | Hum: ${pkt.humidity}% | Rain: ${pkt.rainStatus} (${pkt.rainProbability}%)`,
-            timestamp: pkt.receivedAt || pkt.timestamp
-          }))
-        )
+        weatherReportLogs: weatherLogs
       }
     });
   } catch (error) {
