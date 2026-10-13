@@ -427,9 +427,12 @@ void loop() {
   }
 
   // 9. Dedicated Non-Blocking MicroSD Offline Backlog Sync Engine
-  // Runs every 30s when connected, offset from live telemetry by >6s to ensure 100% free heap for TLS
+  // Runs every 30s when connected, strictly guarded in a collision-free window:
+  // > 7s after previous live upload, and > 7s before next live upload (guarantees zero SSL heap conflict)
   if (WiFi.status() == WL_CONNECTED && sdAvailable) {
-    if (currentMillis - lastSdSyncTime >= SD_SYNC_INTERVAL && (currentMillis - lastTelemetryTime > 6000)) {
+    bool safeFromLastTelemetry = (currentMillis - lastTelemetryTime > 7000);
+    bool safeFromNextTelemetry = (currentMillis - lastTelemetryTime < (activeTelemetryInterval - 7000));
+    if (currentMillis - lastSdSyncTime >= SD_SYNC_INTERVAL && safeFromLastTelemetry && safeFromNextTelemetry) {
       lastSdSyncTime = currentMillis;
       syncOfflineSDRecords();
     }

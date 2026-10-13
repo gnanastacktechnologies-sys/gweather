@@ -97,7 +97,7 @@ export default function HistoryCard({ historyData, summary, selectedFilter, onFi
                   const isSdEvent = row.source === 'sd_event';
                   return (
                     <tr key={row._id || idx}>
-                      <td>{formatTime(row.receivedAt || row.timestamp)}</td>
+                      <td>{formatTime(row.timestamp || row.receivedAt)}</td>
                       <td>
                         {isSdEvent ? (
                           <span className="source-tag tag-sd-event" title="Event-driven rapid storm/rain log from MicroSD">🚨 SD EVENT</span>

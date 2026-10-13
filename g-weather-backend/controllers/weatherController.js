@@ -230,8 +230,8 @@ export const getLatestWeather = async (req, res) => {
   try {
     if (mongoose.connection.readyState === 1) {
       try {
-        // Retrieve newest reading by receivedAt (most recent real-time upload)
-        let dbRecord = await Weather.findOne().sort({ receivedAt: -1, _id: -1 });
+        // Retrieve newest reading by actual weather observation timestamp
+        let dbRecord = await Weather.findOne().sort({ timestamp: -1, receivedAt: -1, _id: -1 });
         
         // If the latest record came from offline SD batch (which lacks power/uptime fields),
         // seamlessly preserve the hardware power & runtime metrics from the latest live telemetry record
@@ -322,14 +322,14 @@ export const getWeatherHistory = async (req, res) => {
             { timestamp: { $gte: startDate } }
           ];
         }
-        records = await Weather.find(query).sort({ receivedAt: -1, _id: -1 }).limit(limit);
+        records = await Weather.find(query).sort({ timestamp: -1, receivedAt: -1, _id: -1 }).limit(limit);
       } catch (dbErr) {
         console.error('[DB History Query Warning]', dbErr.message);
       }
     }
 
     if ((!records || records.length === 0) && inMemoryHistory.length > 0) {
-      records = [...inMemoryHistory];
+      records = [...inMemoryHistory].sort((a, b) => new Date(b.timestamp || b.receivedAt) - new Date(a.timestamp || a.receivedAt));
       if (days > 0) {
         const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
         records = records.filter(item => new Date(item.timestamp || item.receivedAt) >= startDate);
