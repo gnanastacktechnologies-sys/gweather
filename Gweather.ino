@@ -36,6 +36,7 @@
  */
 
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <Wire.h>
@@ -146,6 +147,14 @@ struct WeatherData {
   float estimatedCurrentMA = 0.0;
   float estimatedPowerW = 0.0;
   double estimatedEnergyWh = 0.0;
+
+  // Advanced Meteorological & Power Intelligence
+  float heatIndex = 0.0;
+  float dewPoint = 0.0;
+  float dewSpread = 0.0;
+  float seaLevelPressure = 0.0;
+  String forecast = "FAIR";
+  String powerMode = "NORMAL";
 };
 
 WeatherData weather;
@@ -253,6 +262,7 @@ String getFormattedISO8601Timestamp();
 void handleTelemetryUpload();
 void syncOfflineSDRecords();
 void updatePowerEstimate();
+unsigned long getAdaptiveTelemetryInterval();
 
 // ============================================================================
 // SETUP FUNCTION
@@ -292,6 +302,7 @@ void setup() {
   WiFi.setSleep(true);
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
 
   Serial.println("Wi-Fi connecting...");
 
@@ -343,27 +354,36 @@ void loop() {
   if (isEvent) {
     lastSdLogTime = currentMillis;
     logToSDCard("EVENT");
+    // Instant Emergency Telemetry Upload on weather anomaly (Rain start / sudden storm front)
+    if (WiFi.status() == WL_CONNECTED) {
+      lastTelemetryTime = currentMillis;
+      handleTelemetryUpload();
+    }
   } else if (currentMillis - lastSdLogTime >= SD_LOG_INTERVAL) {
     lastSdLogTime = currentMillis;
     logToSDCard("AVG");
   }
 
-  // 6. TFT Page Auto-Rotation
-  if (currentMillis - lastTftPageTime >= TFT_PAGE_INTERVAL) {
+  // 6. TFT Page Auto-Rotation (Smart Night Display Optimization)
+  bool isNightMode = (weather.lux < 5.0f && (nowRTC.hour() >= 22 || nowRTC.hour() < 5));
+  unsigned long activePageInterval = isNightMode ? 10000 : TFT_PAGE_INTERVAL;
+  if (currentMillis - lastTftPageTime >= activePageInterval) {
     lastTftPageTime = currentMillis;
     currentTftPage = (currentTftPage + 1) % TOTAL_TFT_PAGES;
     pageNeedsFullRedraw = true;
   }
 
-  // 7. TFT Screen Refresh
-  if (currentMillis - lastTftRefreshTime >= TFT_REFRESH_INTERVAL ||
+  // 7. TFT Screen Refresh (Dirty-region refresh rate)
+  unsigned long activeRefreshInterval = isNightMode ? 5000 : TFT_REFRESH_INTERVAL;
+  if (currentMillis - lastTftRefreshTime >= activeRefreshInterval ||
       pageNeedsFullRedraw) {
     lastTftRefreshTime = currentMillis;
     updateTFTDisplay();
   }
 
-  // 8. Live Telemetry Upload to Express API
-  if (currentMillis - lastTelemetryTime >= TELEMETRY_INTERVAL) {
+  // 8. Adaptive Battery-Aware Live Telemetry Upload to Express API
+  unsigned long activeTelemetryInterval = getAdaptiveTelemetryInterval();
+  if (currentMillis - lastTelemetryTime >= activeTelemetryInterval) {
     lastTelemetryTime = currentMillis;
     handleTelemetryUpload();
   }
@@ -405,6 +425,29 @@ void updatePowerEstimate() {
   }
 
   lastPowerUpdateTime = currentMillis;
+}
+
+// ============================================================================
+// ADAPTIVE POWER-AWARE TELEMETRY INTERVAL CONTROLLER
+// ============================================================================
+unsigned long getAdaptiveTelemetryInterval() {
+  // Active rain or storm conditions: maintain high-frequency 60s stream
+  if (weather.rainStatus != "DRY" || weather.pressTrend == "FALLING") {
+    return 60000;
+  }
+
+  // Low Battery Conservation Mode (< 3.6V): upload every 180s (3 minutes) to protect battery
+  if (!weather.isUsbPower && weather.batteryVoltage > 0.5f && weather.batteryVoltage < 3.6f) {
+    return 180000;
+  }
+
+  // Normal Discharging Battery Mode (3.6V - 3.9V): upload every 90s
+  if (!weather.isUsbPower && weather.batteryVoltage > 0.5f && weather.batteryVoltage < 3.9f) {
+    return 90000;
+  }
+
+  // High Battery (>= 4.0V) or USB Power: standard high-resolution 60s stream
+  return 60000;
 }
 
 // ============================================================================
@@ -562,11 +605,18 @@ void readSensors() {
   float t = dht.readTemperature();
   float h = dht.readHumidity();
 
-  if (!isnan(t)) {
-    weather.temperature = t;
+  // Robust Bounds & Glitch Filter
+  if (!isnan(t) && t >= -20.0f && t <= 65.0f) {
+    // Reject electrical spike jump > 7°C in a single 10s step
+    if (weather.temperature == 0.0f || abs(t - weather.temperature) < 7.0f) {
+      weather.temperature = t;
+    }
   }
-  if (!isnan(h)) {
-    weather.humidity = h;
+  if (!isnan(h) && h >= 2.0f && h <= 100.0f) {
+    // Reject electrical spike jump > 20% in a single 10s step
+    if (weather.humidity == 0.0f || abs(h - weather.humidity) < 20.0f) {
+      weather.humidity = h;
+    }
   }
 
   // 2. Read BMP280 (Barometric Pressure & Altitude)
@@ -574,11 +624,13 @@ void readSensors() {
     float p = bmp.readPressure() / 100.0F;
     float alt = bmp.readAltitude(1013.25);
 
-    if (!isnan(p) && p > 300.0 && p < 1100.0) {
-      weather.pressure = p;
+    if (!isnan(p) && p >= 650.0f && p <= 1100.0f) {
+      if (weather.pressure == 0.0f || abs(p - weather.pressure) < 15.0f) {
+        weather.pressure = p;
+      }
     }
 
-    if (!isnan(alt)) {
+    if (!isnan(alt) && alt >= -100.0f && alt <= 3000.0f) {
       weather.altitude = alt;
     }
   }
@@ -600,7 +652,7 @@ void readSensors() {
   if (bh1750Available) {
     float l = lightMeter.readLightLevel();
 
-    if (l >= 0.0) {
+    if (l >= 0.0f && l <= 120000.0f) {
       weather.lux = l;
     }
   }
@@ -628,17 +680,17 @@ void readSensors() {
   weather.rainRaw = rawRain;
 
   // Rain Exponential Moving Average (EMA) Noise Filter (alpha = 0.15)
-  const float alpha = 0.15;
+  const float alpha = 0.15f;
   weather.rainFiltered =
-      (alpha * rawRain) + ((1.0 - alpha) * weather.rainFiltered);
+      (alpha * rawRain) + ((1.0f - alpha) * weather.rainFiltered);
 
   // Read Battery Divider (GPIO35 with 10.04kΩ upper + 9.90kΩ lower divider)
   int battRaw = analogRead(BATTERY_PIN);
-  const float dividerRatio = (10.04 + 9.90) / 9.90;
-  weather.batteryVoltage = (battRaw / 4095.0) * 3.3 * dividerRatio;
+  const float dividerRatio = (10.04f + 9.90f) / 9.90f;
+  weather.batteryVoltage = (battRaw / 4095.0f) * 3.3f * dividerRatio;
 
-  // Flag testing/USB power state if battery voltage is below threshold
-  weather.isUsbPower = (weather.batteryVoltage < 3.0);
+  // Flag testing/USB power state if battery voltage is below threshold or on 5V rail
+  weather.isUsbPower = (weather.batteryVoltage < 3.0f || weather.batteryVoltage >= 4.7f);
 }
 
 // ============================================================================
@@ -650,11 +702,62 @@ void applyV2Intelligence() {
   float dewPoint = (237.7f * alpha) / (17.27f - alpha);
   float dewSpread = weather.temperature - dewPoint;
 
-  // 2. Physical Rain Wetness on Sensor Pad (4095 = Dry, <=1000 = Saturated)
+  weather.dewPoint = dewPoint;
+  weather.dewSpread = dewSpread;
+
+  // 2. NOAA Heat Index ("Feels Like" Perceived Temperature)
+  float tf = (weather.temperature * 1.8f) + 32.0f;
+  float rh = weather.humidity;
+  float hi_f = 0.5f * (tf + 61.0f + ((tf - 68.0f) * 1.2f) + (rh * 0.094f));
+  if (hi_f >= 80.0f) {
+    hi_f = -42.379f + 2.04901523f * tf + 10.14333127f * rh - 0.22475541f * tf * rh
+           - 0.00683783f * tf * tf - 0.05481717f * rh * rh + 0.00122874f * tf * tf * rh
+           + 0.00085282f * tf * rh * rh - 0.00000199f * tf * tf * rh * rh;
+  }
+  weather.heatIndex = (hi_f - 32.0f) / 1.8f;
+
+  // 3. Sea-Level Normalized Barometric Pressure (QNH in hPa)
+  if (weather.pressure > 500.0f) {
+    float stationAlt = (weather.altitude > 50.0f && weather.altitude < 1500.0f) ? weather.altitude : 320.0f;
+    weather.seaLevelPressure = weather.pressure * pow(1.0f - (0.0065f * stationAlt) / (weather.temperature + 0.0065f * stationAlt + 273.15f), -5.257f);
+  } else {
+    weather.seaLevelPressure = weather.pressure;
+  }
+
+  // 4. Zambretti Barometric 6-Hour Forecast Matrix
+  float qnh = (weather.seaLevelPressure > 800.0f) ? weather.seaLevelPressure : weather.pressure;
+  if (weather.pressTrend == "RISING") {
+    if (qnh >= 1022.0f) weather.forecast = "Settled Fine";
+    else if (qnh >= 1012.0f) weather.forecast = "Fair Weather";
+    else if (qnh >= 1002.0f) weather.forecast = "Improving";
+    else weather.forecast = "Fair Intervals";
+  } else if (weather.pressTrend == "FALLING") {
+    if (qnh >= 1022.0f) weather.forecast = "Fair, Rain Later";
+    else if (qnh >= 1012.0f) weather.forecast = "Changeable / Rain";
+    else if (qnh >= 1002.0f) weather.forecast = "Rain Likely";
+    else weather.forecast = "Storm Warning";
+  } else {
+    if (qnh >= 1015.0f) weather.forecast = "Fine Weather";
+    else if (qnh >= 1005.0f) weather.forecast = "Partly Cloudy";
+    else weather.forecast = "Unsettled";
+  }
+
+  // 5. Intelligent Power Mode State
+  if (weather.isUsbPower) {
+    weather.powerMode = "USB FULL";
+  } else if (weather.batteryVoltage >= 4.0f) {
+    weather.powerMode = "SOLAR HIGH";
+  } else if (weather.batteryVoltage >= 3.6f) {
+    weather.powerMode = "BATTERY NORMAL";
+  } else {
+    weather.powerMode = "CRITICAL ECO";
+  }
+
+  // 6. Physical Rain Wetness on Sensor Pad (4095 = Dry, <=1000 = Saturated)
   float wetnessPct = map(constrain((int)weather.rainFiltered, 1000, 4095), 4095, 1000, 0, 100);
   bool physicalRainDetected = (wetnessPct > 20.0f);
 
-  // 3. Multi-Sensor Rain Probability Fusion
+  // 7. Multi-Sensor Rain Probability Fusion
   float prob = 0.0f;
 
   if (physicalRainDetected) {
@@ -1285,6 +1388,13 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
       tft.print(millis() / 3600000.0, 2);
       tft.print(" h   ");
 
+      // Power Intelligence Mode
+      tft.setCursor(8, 136);
+      tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
+      tft.print("MODE: ");
+      tft.print(weather.powerMode);
+      tft.print("   ");
+
       break;
 
     case 7: // PAGE 8: EXACT APPROVED V3.2 DATE & TIME PAGE
@@ -1466,7 +1576,12 @@ void handleTelemetryUpload() {
   jsonPayload += "\"estimatedPowerW\":" + String(weather.estimatedPowerW, 2) + ",";
   jsonPayload += "\"estimatedEnergyWh\":" + String(weather.estimatedEnergyWh, 2) + ",";
   jsonPayload += "\"uptimeHours\":" + String(millis() / 3600000.0, 2) + ",";
-  jsonPayload += "\"timestamp\":\"" + getFormattedISO8601Timestamp() + "\"";
+  jsonPayload += "\"timestamp\":\"" + getFormattedISO8601Timestamp() + "\",";
+  jsonPayload += "\"heatIndex\":" + String(weather.heatIndex, 2) + ",";
+  jsonPayload += "\"dewPoint\":" + String(weather.dewPoint, 2) + ",";
+  jsonPayload += "\"seaLevelPressure\":" + String(weather.seaLevelPressure, 2) + ",";
+  jsonPayload += "\"forecast\":\"" + weather.forecast + "\",";
+  jsonPayload += "\"powerMode\":\"" + weather.powerMode + "\"";
   jsonPayload += "}";
 
   int httpResponseCode = http.POST(jsonPayload);

@@ -80,6 +80,28 @@ const weatherSchema = new mongoose.Schema(
       type: Number,
       default: 0
     },
+    heatIndex: {
+      type: Number,
+      default: 0
+    },
+    dewPoint: {
+      type: Number,
+      default: 0
+    },
+    seaLevelPressure: {
+      type: Number,
+      default: 0
+    },
+    forecast: {
+      type: String,
+      default: 'Fair Weather',
+      trim: true
+    },
+    powerMode: {
+      type: String,
+      default: 'NORMAL',
+      trim: true
+    },
     source: {
       type: String,
       default: 'live',

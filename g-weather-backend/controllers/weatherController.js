@@ -88,7 +88,12 @@ export const postWeatherData = async (req, res, next) => {
       isUsbPower,
       estimatedPowerW,
       estimatedEnergyWh,
-      uptimeHours
+      uptimeHours,
+      heatIndex,
+      dewPoint,
+      seaLevelPressure,
+      forecast,
+      powerMode
     } = req.body;
 
     // Field validation: temperature, humidity, and pressure required
@@ -184,6 +189,11 @@ export const postWeatherData = async (req, res, next) => {
       estimatedPowerW: estimatedPowerW !== undefined ? Number(estimatedPowerW) : 0,
       estimatedEnergyWh: estimatedEnergyWh !== undefined ? Number(estimatedEnergyWh) : 0,
       uptimeHours: uptimeHours !== undefined ? Number(uptimeHours) : 0,
+      heatIndex: heatIndex !== undefined ? Number(heatIndex) : (finalTemp > 0 ? finalTemp : 0),
+      dewPoint: dewPoint !== undefined ? Number(dewPoint) : 0,
+      seaLevelPressure: seaLevelPressure !== undefined ? Number(seaLevelPressure) : Number(pressure),
+      forecast: forecast || "Fair Weather",
+      powerMode: powerMode || (isUsbPower ? "USB FULL" : "BATTERY NORMAL"),
       source: req.body.source || "live",
       timestamp: parsedTimestamp,
       receivedAt: now
