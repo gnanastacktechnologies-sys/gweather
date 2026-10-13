@@ -222,8 +222,10 @@ body.scroll-locked {
 .brand-logo {
   width: 48px;
   height: 48px;
-  border-radius: var(--r-lg);
-  object-fit: cover;
+  border-radius: var(--r-md);
+  object-fit: contain;
+  background: #ffffff;
+  padding: 2px;
   border: 1.5px solid rgba(0, 242, 254, 0.4);
   box-shadow: 0 0 14px rgba(0, 242, 254, 0.3);
 }
@@ -1794,10 +1796,12 @@ body.scroll-locked {
 }
 
 .sidebar-logo-img {
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   border-radius: var(--r-md);
-  object-fit: cover;
+  object-fit: contain;
+  background: #ffffff;
+  padding: 2px;
   border: 1.5px solid var(--cyan);
   box-shadow: 0 0 14px rgba(0, 242, 254, 0.35);
 }

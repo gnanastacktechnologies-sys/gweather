@@ -45,7 +45,7 @@ export default function Header({
               <h1 className="brand-title">G-WEATHER</h1>
               <span className="version-chip">V3.2 ULTIMATE</span>
             </div>
-            <span className="brand-subtitle">Smart Village Weather Telemetry Station</span>
+            <span className="brand-subtitle">Real Weather • Better Tomorrow</span>
           </div>
         </div>
       </div>
