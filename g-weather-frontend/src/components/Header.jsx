@@ -57,7 +57,7 @@ export default function Header({
           title="Upload or sync weather_log.csv from MicroSD Card"
         >
           <SdCardIcon className="chip-svg text-cyan" />
-          <span>SD SYNC</span>
+          <span className="sd-btn-label">SD SYNC</span>
         </button>
 
         <div className="clock-chip" title="System Local Time">

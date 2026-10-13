@@ -106,7 +106,7 @@ export default function App() {
     setActiveSection(sectionId);
     const el = document.getElementById(sectionId);
     if (el) {
-      const headerOffset = 95;
+      const headerOffset = window.innerWidth <= 480 ? 70 : (window.innerWidth <= 768 ? 82 : 96);
       const elementPosition = el.getBoundingClientRect().top;
       const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
       window.scrollTo({
@@ -128,7 +128,8 @@ export default function App() {
     ];
 
     const handleScroll = () => {
-      const scrollPos = window.scrollY + 130;
+      const offset = window.innerWidth <= 480 ? 85 : 125;
+      const scrollPos = window.scrollY + offset;
       for (let i = sectionIds.length - 1; i >= 0; i--) {
         const el = document.getElementById(sectionIds[i]);
         if (el && el.offsetTop <= scrollPos) {
