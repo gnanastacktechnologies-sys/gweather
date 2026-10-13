@@ -673,13 +673,14 @@ void handleWiFiNonBlocking() {
 void syncNTPtoRTC() {
   if (!rtcAvailable) return;
   struct tm timeinfo;
-  if (getLocalTime(&timeinfo, 20)) {
+  if (getLocalTime(&timeinfo, 2000)) {
     int yr = timeinfo.tm_year + 1900;
     if (yr >= 2024 && yr <= 2035) {
       rtc.adjust(DateTime(yr, timeinfo.tm_mon + 1, timeinfo.tm_mday,
                           timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec));
       nowRTC = rtc.now();
-      Serial.println("[NTP Sync] Hardware RTC synchronized with Internet Atomic Clock (IST).");
+      Serial.print("[NTP Sync] Hardware RTC synchronized with Internet Atomic Clock (IST): ");
+      Serial.println(getFormattedTime12HNoSec());
     }
   }
 }
@@ -1689,6 +1690,24 @@ void handleTelemetryUpload() {
 
     if (httpResponseCode == 201 || httpResponseCode == 200) {
       Serial.println("[Telemetry] Upload successful");
+
+      // Auto-calibrate DS1307 Hardware RTC using Cloud Atomic Epoch
+      String responseBody = http.getString();
+      int epochIdx = responseBody.indexOf("\"epoch\":");
+      if (epochIdx > 0 && rtcAvailable) {
+        long serverEpoch = responseBody.substring(epochIdx + 8).toInt();
+        if (serverEpoch > 1700000000) {
+          // Convert UTC epoch to Indian Standard Time (UTC + 5:30 = +19800 seconds)
+          DateTime serverIST = DateTime((uint32_t)(serverEpoch + 19800));
+          long diff = abs((long)nowRTC.unixtime() - (long)(serverEpoch + 19800));
+          if (diff > 15) { // If RTC drifted or is off by >15 seconds
+            rtc.adjust(serverIST);
+            nowRTC = serverIST;
+            Serial.print("[RTC Auto-Calibration] Corrected hardware RTC from Cloud Atomic Time: ");
+            Serial.println(getFormattedTime12HNoSec());
+          }
+        }
+      }
     } else {
       Serial.print("[Telemetry] HTTP error: ");
       Serial.println(httpResponseCode);

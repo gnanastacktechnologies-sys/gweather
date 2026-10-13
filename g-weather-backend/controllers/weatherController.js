@@ -215,7 +215,9 @@ export const postWeatherData = async (req, res, next) => {
     return res.status(201).json({
       success: true,
       message: "Weather data received",
-      data: savedRecord
+      data: savedRecord,
+      epoch: Math.floor(now.getTime() / 1000),
+      serverTime: now.toISOString()
     });
   } catch (error) {
     next(error);
