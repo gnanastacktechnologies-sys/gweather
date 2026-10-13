@@ -50,6 +50,7 @@
 #include <SD.h>
 #include <FS.h>
 #include <Preferences.h>
+#include <time.h>
 
 // ============================================================================
 // WIFI CONFIGURATION (STAGE 2)
@@ -238,6 +239,9 @@ float pressHistory[TREND_SAMPLES];
 int historyIndex = 0;
 int historySampleCount = 0;
 
+unsigned long lastNtpSyncTime = 0;
+const unsigned long NTP_SYNC_INTERVAL = 3600000; // Check/refresh NTP sync every 1 hour
+
 // Last known RTC DateTime
 DateTime nowRTC;
 
@@ -263,6 +267,7 @@ void handleTelemetryUpload();
 void syncOfflineSDRecords();
 void updatePowerEstimate();
 unsigned long getAdaptiveTelemetryInterval();
+void syncNTPtoRTC();
 
 // ============================================================================
 // SETUP FUNCTION
@@ -388,6 +393,12 @@ void loop() {
     handleTelemetryUpload();
   }
 
+  // 9. Periodic Non-Blocking NTP Internet Time Sync (Hourly when connected)
+  if (WiFi.status() == WL_CONNECTED && (currentMillis - lastNtpSyncTime >= NTP_SYNC_INTERVAL || lastNtpSyncTime == 0)) {
+    lastNtpSyncTime = currentMillis;
+    syncNTPtoRTC();
+  }
+
   // Small CPU yield for ESP32 background tasks
   yield();
 }
@@ -477,30 +488,34 @@ void initPeripherals() {
   }
 
   // 3. DS1307 RTC
+  DateTime compileTime = DateTime(F(__DATE__), F(__TIME__));
+
   if (rtc.begin()) {
     rtcAvailable = true;
 
-    // Use ESP32 Non-Volatile Storage (NVS) to ensure one-time calibration to 08:45 AM on flash
+    // Automatic Laptop Date & Time Synchronization on each Code Upload
     Preferences prefs;
     prefs.begin("rtc_sync", false);
-    uint32_t lastAdjustMagic = prefs.getUInt("magic", 0);
-    const uint32_t FLASH_SYNC_ID = 2026101205; // Flash ID for Oct 12, 2026 07:40 PM
+    String lastBuild = prefs.getString("build", "");
+    String currentBuild = String(__DATE__) + " " + String(__TIME__);
 
-    if (lastAdjustMagic != FLASH_SYNC_ID) {
-      // First boot immediately after flash: Calibrate hardware RTC to 07:40:00 PM
-      rtc.adjust(DateTime(2026, 10, 12, 19, 40, 0));
-      prefs.putUInt("magic", FLASH_SYNC_ID);
-      Serial.println("[Hardware RTC] Calibrated to 07:40:00 PM (12 OCT 2026) on flash.");
+    if (lastBuild != currentBuild) {
+      // First boot immediately after upload from laptop:
+      // Automatically calibrate hardware RTC to laptop's compilation date & time
+      rtc.adjust(compileTime);
+      prefs.putString("build", currentBuild);
+      Serial.print("[Hardware RTC] Auto-calibrated to Laptop Upload Time: ");
+      Serial.println(currentBuild);
     } else if (!rtc.isrunning()) {
-      Serial.println("[Hardware Warning] RTC oscillator stopped. Setting 07:40 PM.");
-      rtc.adjust(DateTime(2026, 10, 12, 19, 40, 0));
+      Serial.println("[Hardware Warning] RTC oscillator stopped. Initializing to build time.");
+      rtc.adjust(compileTime);
     } else {
       DateTime check = rtc.now();
-      if (check.year() < 2024 || check.year() > 2030 || check.day() > 31 || check.month() > 12) {
-        Serial.println("[Hardware Warning] RTC time corrupted! Re-calibrating to 07:40 PM.");
-        rtc.adjust(DateTime(2026, 10, 12, 19, 40, 0));
+      if (check.year() < 2024 || check.year() > 2035 || check.day() > 31 || check.month() > 12) {
+        Serial.println("[Hardware Warning] RTC time corrupted! Re-calibrating to build time.");
+        rtc.adjust(compileTime);
       } else {
-        Serial.println("[Hardware RTC] Normal restart: RTC continues ticking without reset.");
+        Serial.println("[Hardware RTC] Normal restart: RTC continues ticking continuously without reset.");
       }
     }
     prefs.end();
@@ -509,6 +524,7 @@ void initPeripherals() {
     Serial.println("[Hardware] DS1307 RTC running.");
   } else {
     Serial.println("[Hardware Warning] DS1307 RTC not detected at 0x68.");
+    nowRTC = compileTime;
   }
 
   // 4. BH1750 Light Sensor
@@ -562,6 +578,8 @@ void handleWiFiNonBlocking() {
     if (!wifiWasConnected) {
       wifiWasConnected = true;
       Serial.println("WiFi connected");
+      // Configure Indian Standard Time (IST UTC+5:30) via NTP in background
+      configTime(19800, 0, "pool.ntp.org", "time.google.com");
       // Trigger instant telemetry upload upon Wi-Fi connection
       lastTelemetryTime = millis();
       handleTelemetryUpload();
@@ -593,6 +611,23 @@ void handleWiFiNonBlocking() {
           currentWifiRetryInterval = WIFI_RETRY_MAX_INTERVAL;
         }
       }
+    }
+  }
+}
+
+// ============================================================================
+// NON-BLOCKING NTP INTERNET TIME SYNCHRONIZATION
+// ============================================================================
+void syncNTPtoRTC() {
+  if (!rtcAvailable) return;
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo, 20)) {
+    int yr = timeinfo.tm_year + 1900;
+    if (yr >= 2024 && yr <= 2035) {
+      rtc.adjust(DateTime(yr, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                          timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec));
+      nowRTC = rtc.now();
+      Serial.println("[NTP Sync] Hardware RTC synchronized with Internet Atomic Clock (IST).");
     }
   }
 }
@@ -1450,86 +1485,49 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
 // HELPER UTILITIES FOR DATE & TIME FORMATTING
 // ============================================================================
 String getFormattedTime12HNoSec() {
-  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "07:40 PM";
+  DateTime t = (nowRTC.year() >= 2024 && nowRTC.year() <= 2035) ? nowRTC : DateTime(F(__DATE__), F(__TIME__));
 
-  int hour12 = nowRTC.hour() % 12;
+  int hour12 = t.hour() % 12;
+  if (hour12 == 0) hour12 = 12;
 
-  if (hour12 == 0) {
-    hour12 = 12;
-  }
-
-  const char* ampm = nowRTC.hour() >= 12 ? "PM" : "AM";
-  int minVal = constrain((int)nowRTC.minute(), 0, 59);
+  const char* ampm = t.hour() >= 12 ? "PM" : "AM";
+  int minVal = constrain((int)t.minute(), 0, 59);
 
   char buf[12];
-
-  snprintf(
-    buf,
-    sizeof(buf),
-    "%02d:%02d %s",
-    hour12,
-    minVal,
-    ampm
-  );
-
+  snprintf(buf, sizeof(buf), "%02d:%02d %s", hour12, minVal, ampm);
   return String(buf);
 }
 
 String getFormattedDateDDMONYYYY() {
-  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "12 OCT 2026";
+  DateTime t = (nowRTC.year() >= 2024 && nowRTC.year() <= 2035) ? nowRTC : DateTime(F(__DATE__), F(__TIME__));
 
-  int m = constrain((int)nowRTC.month(), 1, 12);
-  int d = constrain((int)nowRTC.day(), 1, 31);
+  int m = constrain((int)t.month(), 1, 12);
+  int d = constrain((int)t.day(), 1, 31);
 
   char buf[15];
-
-  snprintf(
-    buf,
-    sizeof(buf),
-    "%02d %s %04d",
-    d,
-    monthNamesUpper[m - 1],
-    nowRTC.year()
-  );
-
+  snprintf(buf, sizeof(buf), "%02d %s %04d", d, monthNamesUpper[m - 1], t.year());
   return String(buf);
 }
 
 String getDayOfWeekNameUpper() {
-  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "MONDAY";
+  DateTime t = (nowRTC.year() >= 2024 && nowRTC.year() <= 2035) ? nowRTC : DateTime(F(__DATE__), F(__TIME__));
 
-  int d = nowRTC.dayOfTheWeek();
-
-  if (d < 0 || d > 6) {
-    d = 0;
-  }
-
+  int d = t.dayOfTheWeek();
+  if (d < 0 || d > 6) d = 0;
   return String(daysOfWeekUpper[d]);
 }
 
 String getFormattedISO8601Timestamp() {
-  if (!rtcAvailable || nowRTC.year() < 2024 || nowRTC.year() > 2030) return "2026-10-12T19:40:00+05:30";
+  DateTime t = (nowRTC.year() >= 2024 && nowRTC.year() <= 2035) ? nowRTC : DateTime(F(__DATE__), F(__TIME__));
 
-  int m = constrain((int)nowRTC.month(), 1, 12);
-  int d = constrain((int)nowRTC.day(), 1, 31);
-  int h = constrain((int)nowRTC.hour(), 0, 23);
-  int mi = constrain((int)nowRTC.minute(), 0, 59);
-  int s = constrain((int)nowRTC.second(), 0, 59);
+  int m = constrain((int)t.month(), 1, 12);
+  int d = constrain((int)t.day(), 1, 31);
+  int h = constrain((int)t.hour(), 0, 23);
+  int mi = constrain((int)t.minute(), 0, 59);
+  int s = constrain((int)t.second(), 0, 59);
 
   char buf[32];
-
-  snprintf(
-    buf,
-    sizeof(buf),
-    "%04d-%02d-%02dT%02d:%02d:%02d+05:30",
-    nowRTC.year(),
-    m,
-    d,
-    h,
-    mi,
-    s
-  );
-
+  snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d+05:30", t.year(), m, d, h, mi, s);
   return String(buf);
 }
 
