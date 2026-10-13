@@ -242,6 +242,10 @@ int historySampleCount = 0;
 unsigned long lastNtpSyncTime = 0;
 const unsigned long NTP_SYNC_INTERVAL = 3600000; // Check/refresh NTP sync every 1 hour
 
+// Sensor Initialization & Glitch Flags (Zero-Boot Protection)
+bool hasValidTempReading = false;
+bool hasValidHumReading = false;
+
 // Last known RTC DateTime
 DateTime nowRTC;
 
@@ -311,8 +315,31 @@ void setup() {
 
   Serial.println("Wi-Fi connecting...");
 
-  // Initial Data Sample
-  readSensors();
+  // Load last valid sensor readings from NVS cache (instant zero-boot protection)
+  Preferences cache;
+  if (cache.begin("wt_cache", true)) {
+    float savedTemp = cache.getFloat("temp", 0.0f);
+    float savedHum = cache.getFloat("hum", 0.0f);
+    if (savedTemp > -20.0f && savedTemp < 65.0f && savedTemp != 0.0f) {
+      weather.temperature = savedTemp;
+      hasValidTempReading = true;
+    }
+    if (savedHum >= 2.0f && savedHum <= 100.0f) {
+      weather.humidity = savedHum;
+      hasValidHumReading = true;
+    }
+    cache.end();
+  }
+
+  // Initial Data Sample with DHT22 Warmup Loop (up to 4 retries, 500ms apart)
+  for (int retry = 0; retry < 4; retry++) {
+    readSensors();
+    if (hasValidTempReading && hasValidHumReading) {
+      Serial.println("[Hardware] Sensors stabilized with valid data on boot.");
+      break;
+    }
+    delay(500);
+  }
   applyV2Intelligence();
 
   // Initialize power monitor timer after initial sensor setup
@@ -640,17 +667,37 @@ void readSensors() {
   float t = dht.readTemperature();
   float h = dht.readHumidity();
 
-  // Robust Bounds & Glitch Filter
+  // Robust Bounds & Glitch Filter with BMP280 Temperature Fallback
   if (!isnan(t) && t >= -20.0f && t <= 65.0f) {
-    // Reject electrical spike jump > 7°C in a single 10s step
-    if (weather.temperature == 0.0f || abs(t - weather.temperature) < 7.0f) {
+    if (!hasValidTempReading || abs(t - weather.temperature) < 7.0f) {
       weather.temperature = t;
+      hasValidTempReading = true;
+    }
+  } else if (bmpAvailable && (!hasValidTempReading || weather.temperature <= 0.0f)) {
+    // Hardware Fallback: Read BMP280 temperature if DHT22 not yet ready
+    float bmpT = bmp.readTemperature();
+    if (!isnan(bmpT) && bmpT >= -20.0f && bmpT <= 65.0f) {
+      weather.temperature = bmpT;
+      hasValidTempReading = true;
     }
   }
+
   if (!isnan(h) && h >= 2.0f && h <= 100.0f) {
-    // Reject electrical spike jump > 20% in a single 10s step
-    if (weather.humidity == 0.0f || abs(h - weather.humidity) < 20.0f) {
+    if (!hasValidHumReading || abs(h - weather.humidity) < 20.0f) {
       weather.humidity = h;
+      hasValidHumReading = true;
+    }
+  }
+
+  // Periodic NVS cache save (every 60s) for restart persistence
+  static unsigned long lastNvsCacheSave = 0;
+  if (millis() - lastNvsCacheSave > 60000 && hasValidTempReading && hasValidHumReading) {
+    lastNvsCacheSave = millis();
+    Preferences cache;
+    if (cache.begin("wt_cache", false)) {
+      cache.putFloat("temp", weather.temperature);
+      cache.putFloat("hum", weather.humidity);
+      cache.end();
     }
   }
 
@@ -854,6 +901,11 @@ void applyV2Intelligence() {
 // SLIDING TREND ANALYSIS
 // ============================================================================
 void updateTrends() {
+  // Reject uninitialized zero readings from corrupting trend buffers
+  if (weather.temperature <= 0.0f || weather.humidity <= 0.0f) {
+    return;
+  }
+
   tempHistory[historyIndex] = weather.temperature;
   humHistory[historyIndex] = weather.humidity;
   pressHistory[historyIndex] = weather.pressure;
@@ -908,30 +960,36 @@ void update24HourStats() {
     int currentDay = nowRTC.day();
 
     if (lastDay != -1 && currentDay != lastDay) {
-      weather.tempMin24h = weather.temperature;
-      weather.tempMax24h = weather.temperature;
-      weather.humMin24h = weather.humidity;
-      weather.humMax24h = weather.humidity;
+      if (weather.temperature > 0.0f) {
+        weather.tempMin24h = weather.temperature;
+        weather.tempMax24h = weather.temperature;
+      }
+      if (weather.humidity > 0.0f) {
+        weather.humMin24h = weather.humidity;
+        weather.humMax24h = weather.humidity;
+      }
     }
 
     lastDay = currentDay;
   }
 
-  // Update bounds
-  if (weather.temperature < weather.tempMin24h) {
-    weather.tempMin24h = weather.temperature;
+  // Update bounds ONLY when readings are valid non-zero
+  if (weather.temperature > -20.0f && weather.temperature <= 65.0f && weather.temperature != 0.0f) {
+    if (weather.tempMin24h == 999.0f || weather.temperature < weather.tempMin24h) {
+      weather.tempMin24h = weather.temperature;
+    }
+    if (weather.tempMax24h == -999.0f || weather.temperature > weather.tempMax24h) {
+      weather.tempMax24h = weather.temperature;
+    }
   }
 
-  if (weather.temperature > weather.tempMax24h) {
-    weather.tempMax24h = weather.temperature;
-  }
-
-  if (weather.humidity < weather.humMin24h) {
-    weather.humMin24h = weather.humidity;
-  }
-
-  if (weather.humidity > weather.humMax24h) {
-    weather.humMax24h = weather.humidity;
+  if (weather.humidity >= 2.0f && weather.humidity <= 100.0f) {
+    if (weather.humMin24h == 999.0f || weather.humidity < weather.humMin24h) {
+      weather.humMin24h = weather.humidity;
+    }
+    if (weather.humMax24h == -999.0f || weather.humidity > weather.humMax24h) {
+      weather.humMax24h = weather.humidity;
+    }
   }
 }
 
@@ -939,7 +997,7 @@ void update24HourStats() {
 // INTELLIGENT METEOROLOGICAL SD CARD AGGREGATOR & LOGGING ENGINE
 // ============================================================================
 void accumulateSDSample() {
-  if (weather.temperature >= -30.0 && weather.temperature <= 65.0 && weather.humidity >= 0.0) {
+  if (weather.temperature > -20.0 && weather.temperature <= 65.0 && weather.temperature != 0.0 && weather.humidity > 0.0) {
     sdAggregator.sumTemp += weather.temperature;
     sdAggregator.sumHum += weather.humidity;
     sdAggregator.sumPress += weather.pressure;
@@ -979,6 +1037,7 @@ bool checkSDEventTrigger() {
 
 void logToSDCard(const char* logType) {
   if (!sdAvailable) return;
+  if (weather.temperature <= 0.0f && weather.humidity <= 0.0f) return;
 
   // Compute 5-minute mathematical averages or instantaneous event values
   float logTemp = weather.temperature;
@@ -1537,6 +1596,12 @@ String getFormattedISO8601Timestamp() {
 void handleTelemetryUpload() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[Telemetry] Skipped - Wi-Fi offline");
+    return;
+  }
+
+  // Never upload uninitialized 0.0 telemetry packet to server
+  if (weather.temperature <= 0.0f || weather.humidity <= 0.0f) {
+    Serial.println("[Telemetry] Upload skipped: sensor readings not ready yet (0.0).");
     return;
   }
 
