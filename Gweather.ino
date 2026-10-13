@@ -717,16 +717,25 @@ void readSensors() {
     }
   }
 
-  // Read RTC Time (with corruption rejection)
+  // Read RTC Time (with corruption rejection & software clock ticking fallback)
   if (rtcAvailable) {
     DateTime candidate = rtc.now();
-    if (candidate.year() >= 2024 && candidate.year() <= 2030 &&
+    if (candidate.year() >= 2024 && candidate.year() <= 2035 &&
         candidate.month() >= 1 && candidate.month() <= 12 &&
         candidate.day() >= 1 && candidate.day() <= 31 &&
         candidate.hour() <= 23 && candidate.minute() <= 59) {
       nowRTC = candidate;
     } else {
       Serial.println("[RTC Warning] Corrupted RTC reading ignored; keeping last valid time.");
+    }
+  } else {
+    // Software Clock Fallback: Continuously advance time using ESP32 millis()
+    static unsigned long lastSwRtcMillis = 0;
+    if (lastSwRtcMillis == 0) lastSwRtcMillis = millis();
+    unsigned long elapsedSec = (millis() - lastSwRtcMillis) / 1000;
+    if (elapsedSec > 0) {
+      lastSwRtcMillis += elapsedSec * 1000;
+      nowRTC = DateTime(nowRTC.unixtime() + elapsedSec);
     }
   }
 

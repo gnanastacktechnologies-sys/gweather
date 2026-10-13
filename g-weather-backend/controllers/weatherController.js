@@ -122,14 +122,10 @@ export const postWeatherData = async (req, res, next) => {
     let parsedTimestamp = parseTimestampIST(timestamp);
     const now = new Date();
     
-    // For live telemetry packets: if the timestamp sent by hardware is missing,
-    // in the future, or more than 30 minutes in the past (e.g. RTC hardware default or drift),
-    // align it with current real-time `now` so dashboard metrics & history reflect real-time IST
+    // For live telemetry packets: use current real-time `now` so each packet has a distinct, sequential timestamp
     const isLive = !req.body.source || req.body.source === 'live';
     if (isLive) {
-      if (!parsedTimestamp || Math.abs(now.getTime() - parsedTimestamp.getTime()) > 30 * 60 * 1000) {
-        parsedTimestamp = now;
-      }
+      parsedTimestamp = now;
     }
     
     // Station Connection & Session Tracking

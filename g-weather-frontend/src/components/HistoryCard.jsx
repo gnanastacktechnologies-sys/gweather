@@ -11,20 +11,21 @@ export default function HistoryCard({ historyData, summary, selectedFilter, onFi
         month: 'short',
         day: 'numeric',
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
+        second: '2-digit'
       });
     } catch (e) {
       return String(ts);
     }
   };
 
-  // Deduplicate entries that share the exact same minute for the same device
+  // Render all telemetry log records cleanly, deduplicating only exact identical document IDs
   const uniqueHistory = [];
-  const seenMinutes = new Set();
+  const seenIds = new Set();
   for (const row of historyData) {
-    const timeKey = `${row.deviceId || 'dev'}_${formatTime(row.timestamp || row.receivedAt)}`;
-    if (!seenMinutes.has(timeKey)) {
-      seenMinutes.add(timeKey);
+    const recordKey = row._id || `${row.deviceId || 'dev'}_${row.receivedAt || row.timestamp}`;
+    if (!seenIds.has(recordKey)) {
+      seenIds.add(recordKey);
       uniqueHistory.push(row);
     }
   }
@@ -96,7 +97,7 @@ export default function HistoryCard({ historyData, summary, selectedFilter, onFi
                   const isSdEvent = row.source === 'sd_event';
                   return (
                     <tr key={row._id || idx}>
-                      <td>{formatTime(row.timestamp || row.receivedAt)}</td>
+                      <td>{formatTime(row.receivedAt || row.timestamp)}</td>
                       <td>
                         {isSdEvent ? (
                           <span className="source-tag tag-sd-event" title="Event-driven rapid storm/rain log from MicroSD">🚨 SD EVENT</span>
