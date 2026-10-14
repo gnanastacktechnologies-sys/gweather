@@ -743,25 +743,41 @@ void readSensors() {
     }
   }
 
-  // Read RTC Time (with corruption rejection & software clock ticking fallback)
+  // Read RTC Time (Hardware Ticking with Millis Watchdog Guarantee)
+  // Ensures time NEVER freezes even if the physical DS1307 crystal stops or battery is dead
+  static unsigned long lastClockMillis = 0;
+  static uint32_t lastRtcUnix = 0;
+  if (lastClockMillis == 0) lastClockMillis = millis();
+  unsigned long elapsedClockSec = (millis() - lastClockMillis) / 1000;
+
+  bool rtcTicked = false;
   if (rtcAvailable) {
     DateTime candidate = rtc.now();
     if (candidate.year() >= 2024 && candidate.year() <= 2035 &&
         candidate.month() >= 1 && candidate.month() <= 12 &&
         candidate.day() >= 1 && candidate.day() <= 31 &&
         candidate.hour() <= 23 && candidate.minute() <= 59) {
-      nowRTC = candidate;
-    } else {
-      Serial.println("[RTC Warning] Corrupted RTC reading ignored; keeping last valid time.");
+      // Verify that hardware RTC is genuinely ticking forward
+      if (candidate.unixtime() > lastRtcUnix) {
+        nowRTC = candidate;
+        lastRtcUnix = candidate.unixtime();
+        lastClockMillis = millis();
+        rtcTicked = true;
+      } else if (lastRtcUnix == 0) {
+        nowRTC = candidate;
+        lastRtcUnix = candidate.unixtime();
+        rtcTicked = true;
+      }
     }
-  } else {
-    // Software Clock Fallback: Continuously advance time using ESP32 millis()
-    static unsigned long lastSwRtcMillis = 0;
-    if (lastSwRtcMillis == 0) lastSwRtcMillis = millis();
-    unsigned long elapsedSec = (millis() - lastSwRtcMillis) / 1000;
-    if (elapsedSec > 0) {
-      lastSwRtcMillis += elapsedSec * 1000;
-      nowRTC = DateTime(nowRTC.unixtime() + elapsedSec);
+  }
+
+  // If hardware RTC oscillator is stopped/frozen or offline without NTP, GUARANTEE forward ticking:
+  if (!rtcTicked && elapsedClockSec > 0) {
+    lastClockMillis += elapsedClockSec * 1000;
+    nowRTC = DateTime(nowRTC.unixtime() + elapsedClockSec);
+    lastRtcUnix = nowRTC.unixtime();
+    if (rtcAvailable) {
+      rtc.adjust(nowRTC); // Push advancing time back into RTC registers
     }
   }
 
@@ -1805,8 +1821,8 @@ void syncOfflineSDRecords() {
   int recordCount = 0;
   unsigned long newPos = lastSyncedPos;
 
-  // Read up to 10 records per execution (keeps payload lightweight and non-blocking)
-  while (logFile.available() && recordCount < 10) {
+  // Read up to 30 records per execution (smoothly syncs up to 30m offline backlog in one request)
+  while (logFile.available() && recordCount < 30) {
     String line = logFile.readStringUntil('\n');
     line.trim();
     if (line.length() < 10) continue;
