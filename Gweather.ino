@@ -812,10 +812,13 @@ void readSensors() {
   int rawRain = analogRead(RAIN_PIN);
   weather.rainRaw = rawRain;
 
-  // Rain Exponential Moving Average (EMA) Noise Filter (alpha = 0.15)
-  const float alpha = 0.15f;
-  weather.rainFiltered =
-      (alpha * rawRain) + ((1.0f - alpha) * weather.rainFiltered);
+  // Rain Fast-Attack, Smooth-Decay Envelope Filter
+  // When droplets hit, reacts instantly. When drying, decays smoothly.
+  if (rawRain < (int)weather.rainFiltered) {
+    weather.rainFiltered = (0.75f * rawRain) + (0.25f * weather.rainFiltered);
+  } else {
+    weather.rainFiltered = (0.10f * rawRain) + (0.90f * weather.rainFiltered);
+  }
 
   // Read Battery Divider (GPIO35 with 10.04kΩ upper + 9.90kΩ lower divider)
   int battRaw = analogRead(BATTERY_PIN);
@@ -886,16 +889,27 @@ void applyV2Intelligence() {
     weather.powerMode = "CRITICAL ECO";
   }
 
-  // 6. Physical Rain Wetness on Sensor Pad (4095 = Dry, <=1000 = Saturated)
-  float wetnessPct = map(constrain((int)weather.rainFiltered, 1000, 4095), 4095, 1000, 0, 100);
-  bool physicalRainDetected = (wetnessPct > 20.0f);
+  // 6. High-Sensitivity Physical Rain Wetness Detection
+  // Dry sensor pad on ESP32 12-bit ADC reads ~4000 - 4095.
+  // Even a small individual water droplet conducts between traces and pulls reading down!
+  float activeRainVal = min((float)weather.rainRaw, weather.rainFiltered);
+  float wetnessPct = 0.0f;
+  if (activeRainVal < 4000.0f) {
+    wetnessPct = ((4095.0f - activeRainVal) / 3295.0f) * 100.0f;
+    wetnessPct = constrain(wetnessPct, 0.0f, 100.0f);
+  }
+
+  // Detect individual raindrops with high sensitivity (active ADC < 3980 or wetness >= 1.5%)
+  bool physicalRainDetected = (activeRainVal < 3980.0f || wetnessPct >= 1.5f);
 
   // 7. Multi-Sensor Rain Probability Fusion
   float prob = 0.0f;
 
   if (physicalRainDetected) {
-    // Rain droplets physically detected on sensor plate
-    prob = 80.0f + (wetnessPct * 0.2f);
+    // Water droplets physically detected on sensor plate!
+    // Instant high rain probability regardless of bright sun
+    prob = 80.0f + (wetnessPct * 0.20f);
+    weather.rainStatus = "RAINING";
   } else {
     // Sensor plate is completely dry -> Forecast atmospheric trend
     // A. Barometric Drop Rate (only if pressure is actively falling)
@@ -927,22 +941,20 @@ void applyV2Intelligence() {
     if (weather.pressTrend != "FALLING" && dewSpread > 3.0f) {
       prob = min(prob, 10.0f);
     }
+
+    // Classify forecast status when dry
+    if (prob >= 65.0f) {
+      weather.rainStatus = "LIKELY";
+    } else if (prob >= 40.0f) {
+      weather.rainStatus = "POSSIBLE";
+    } else if (prob >= 20.0f) {
+      weather.rainStatus = "WATCH";
+    } else {
+      weather.rainStatus = "DRY";
+    }
   }
 
   weather.rainProbability = constrain(prob, 0.0f, 100.0f);
-
-  // 4. Strict Rain Status: Show "RAINING" ONLY if water drops physically hit plate
-  if (physicalRainDetected) {
-    weather.rainStatus = "RAINING";
-  } else if (weather.rainProbability >= 65.0f) {
-    weather.rainStatus = "LIKELY";
-  } else if (weather.rainProbability >= 40.0f) {
-    weather.rainStatus = "POSSIBLE";
-  } else if (weather.rainProbability >= 20.0f) {
-    weather.rainStatus = "WATCH";
-  } else {
-    weather.rainStatus = "DRY";
-  }
 
   // 5. Update 24-Hour Min / Max Tracking
   update24HourStats();
