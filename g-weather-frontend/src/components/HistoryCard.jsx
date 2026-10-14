@@ -19,14 +19,52 @@ export default function HistoryCard({ historyData, summary, selectedFilter, onFi
     }
   };
 
-  // Render all telemetry log records cleanly, deduplicating only exact identical document IDs
+  // Render telemetry logs cleanly:
+  // 1. Live stream records: Display every 1-minute live reading.
+  // 2. SD Event records: Display every urgent anomaly event.
+  // 3. SD 5-Minute Averages: For entries within the same 5-minute window (e.g. 12:00 to 12:05)
+  //    or sharing identical timestamps, take the LAST entry time and show it on the website!
+  // Ensure entries are strictly sorted newest to oldest so the first record
+  // in any 5-minute interval is guaranteed to be the LATEST / LAST entry!
+  const sortedHistory = [...historyData].sort((a, b) => {
+    const timeA = new Date(a.timestamp || a.receivedAt || 0).getTime();
+    const timeB = new Date(b.timestamp || b.receivedAt || 0).getTime();
+    if (timeB !== timeA) return timeB - timeA;
+    const recvA = new Date(a.receivedAt || 0).getTime();
+    const recvB = new Date(b.receivedAt || 0).getTime();
+    if (recvB !== recvA) return recvB - recvA;
+    return String(b._id || '').localeCompare(String(a._id || ''), undefined, { numeric: true });
+  });
+
   const uniqueHistory = [];
-  const seenIds = new Set();
-  for (const row of historyData) {
-    const recordKey = row._id || `${row.deviceId || 'dev'}_${row.receivedAt || row.timestamp}`;
-    if (!seenIds.has(recordKey)) {
-      seenIds.add(recordKey);
-      uniqueHistory.push(row);
+  const seenKeys = new Set();
+
+  for (const row of sortedHistory) {
+    const isLive = !row.source || row.source === 'live';
+    const isEvent = row.source === 'sd_event';
+
+    if (isLive || isEvent) {
+      const recordKey = row._id || `${row.deviceId || 'dev'}_${row.timestamp || row.receivedAt}`;
+      if (!seenKeys.has(recordKey)) {
+        seenKeys.add(recordKey);
+        uniqueHistory.push(row);
+      }
+    } else {
+      // SD Average record: Group by 5-minute rolling window or identical formatted minute.
+      // Since historyData is sorted newest-first, the first row encountered is the LAST ENTRY TIME!
+      const ts = new Date(row.timestamp || row.receivedAt);
+      let windowKey;
+      if (!isNaN(ts.getTime())) {
+        const fiveMinBucket = Math.floor(ts.getTime() / 300000);
+        windowKey = `sd_5m_${row.deviceId || 'dev'}_${fiveMinBucket}`;
+      } else {
+        windowKey = `sd_str_${row.deviceId || 'dev'}_${formatTime(row.timestamp || row.receivedAt)}`;
+      }
+
+      if (!seenKeys.has(windowKey)) {
+        seenKeys.add(windowKey);
+        uniqueHistory.push(row);
+      }
     }
   }
 
