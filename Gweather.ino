@@ -1,6 +1,10 @@
 /*
  * ============================================================================
- * G-WEATHER Village Edition — Master Firmware V3.2 + Stage 6 Telemetry
+ * G-WEATHER Village Edition — Master Firmware V3.3 (V3.2 FULL + Reliability/Power Fixes)
+ * V3.3 changes: safer Wi-Fi credential placeholders, ADC attenuation and calibrated
+ * battery-divider reading, sensor freshness flags/N/A display, stricter telemetry
+ * validation, 80MHz CPU and reduced TFT redraw frequency. Original advanced pages,
+ * trends, SD aggregator, offline SD sync and telemetry are retained.
  * ============================================================================
  * Target Hardware: ESP32 DevKit V1 38-Pin
  *
@@ -31,6 +35,8 @@
  * POWER MONITOR:
  * - Software estimate only; no physical current sensor installed.
  * - Displays estimated watts, accumulated Wh, and uptime on Page 7.
+ * - These are software estimates, NOT measured power; no current sensor is installed.
+ * - USB-vs-battery source cannot be detected from the battery-divider pin alone.
  * - Accumulated Wh and uptime reset when the ESP32 restarts.
  * ============================================================================
  */
@@ -55,6 +61,7 @@
 // ============================================================================
 // WIFI CONFIGURATION (STAGE 2)
 // ============================================================================
+// Enter your own Wi-Fi credentials here before upload. Do not publish them.
 const char* WIFI_SSID     = "Jio 5G";
 const char* WIFI_PASSWORD = "123456789";
 
@@ -183,7 +190,7 @@ unsigned long lastTftPageTime = 0;
 const unsigned long TFT_PAGE_INTERVAL = 5000;
 
 unsigned long lastTftRefreshTime = 0;
-const unsigned long TFT_REFRESH_INTERVAL = 2000;
+const unsigned long TFT_REFRESH_INTERVAL = 5000; // Reduce unnecessary TFT redraws; sensor sampling remains 10s
 
 unsigned long lastSdLogTime = 0;
 const unsigned long SD_LOG_INTERVAL = 300000; // 5-Minute Intelligent Rolling Average Window
@@ -248,6 +255,14 @@ const unsigned long SD_SYNC_INTERVAL = 15000; // MicroSD offline backlog sync ch
 // Sensor Initialization & Glitch Flags (Zero-Boot Protection)
 bool hasValidTempReading = false;
 bool hasValidHumReading = false;
+// These flags describe the latest sensor read, not cached values.
+bool dhtTempFresh = false;
+bool dhtHumFresh = false;
+bool pressureFresh = false;
+bool luxFresh = false;
+bool uvFresh = false;
+bool rainFresh = false;
+bool batteryFresh = false;
 
 // Last known RTC DateTime
 DateTime nowRTC;
@@ -288,6 +303,9 @@ void setup() {
   Serial.println(" Mobile Hotspot & Stage 6 Telemetry Active");
   Serial.println("=============================================");
 
+  // Lower CPU clock for lower controller power; Wi-Fi/TFT functionality is retained.
+  setCpuFrequencyMhz(80);
+
   // Deselect SPI CS pins before SPI initialization to ensure SPI bus safety
   pinMode(TFT_CS, OUTPUT);
   digitalWrite(TFT_CS, HIGH);
@@ -298,9 +316,14 @@ void setup() {
   // Explicitly initialize shared hardware SPI bus for TFT and SD Card
   SPI.begin(TFT_SCK, SD_MISO, TFT_MOSI, -1);
 
-  // Configure UV Sensor Pin (ADC1_CH5)
+  // Configure ESP32 ADC1 pins. GPIO33/34/35 are ADC1 inputs and work with Wi-Fi.
   analogReadResolution(12);
+  analogSetPinAttenuation(UV_PIN, ADC_11db);
+  analogSetPinAttenuation(RAIN_PIN, ADC_11db);
+  analogSetPinAttenuation(BATTERY_PIN, ADC_11db);
   pinMode(UV_PIN, INPUT);
+  pinMode(RAIN_PIN, INPUT);
+  pinMode(BATTERY_PIN, INPUT);
 
   // Initialize Wire (I2C)
   Wire.begin(I2C_SDA, I2C_SCL);
@@ -310,7 +333,6 @@ void setup() {
 
   // Initialize Wi-Fi in Station Mode
   WiFi.persistent(false);
-  setCpuFrequencyMhz(80);
   WiFi.setSleep(true);
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -689,6 +711,15 @@ void syncNTPtoRTC() {
 // SENSOR READING ENGINE
 // ============================================================================
 void readSensors() {
+  // Freshness flags are reset on every sample so failed sensors are not presented as current.
+  dhtTempFresh = false;
+  dhtHumFresh = false;
+  pressureFresh = false;
+  luxFresh = false;
+  uvFresh = false;
+  rainFresh = false;
+  batteryFresh = false;
+
   // 1. Read DHT22 (Ambient Temperature & Humidity)
   float t = dht.readTemperature();
   float h = dht.readHumidity();
@@ -698,6 +729,7 @@ void readSensors() {
     if (!hasValidTempReading || abs(t - weather.temperature) < 7.0f) {
       weather.temperature = t;
       hasValidTempReading = true;
+      dhtTempFresh = true;
     }
   } else if (bmpAvailable && (!hasValidTempReading || weather.temperature <= 0.0f)) {
     // Hardware Fallback: Read BMP280 temperature if DHT22 not yet ready
@@ -712,6 +744,7 @@ void readSensors() {
     if (!hasValidHumReading || abs(h - weather.humidity) < 20.0f) {
       weather.humidity = h;
       hasValidHumReading = true;
+      dhtHumFresh = true;
     }
   }
 
@@ -735,6 +768,7 @@ void readSensors() {
     if (!isnan(p) && p >= 650.0f && p <= 1100.0f) {
       if (weather.pressure == 0.0f || abs(p - weather.pressure) < 15.0f) {
         weather.pressure = p;
+        pressureFresh = true;
       }
     }
 
@@ -785,15 +819,17 @@ void readSensors() {
   if (bh1750Available) {
     float l = lightMeter.readLightLevel();
 
-    if (l >= 0.0f && l <= 120000.0f) {
+    if (!isnan(l) && l >= 0.0f && l <= 120000.0f) {
       weather.lux = l;
+      luxFresh = true;
     }
   }
 
   // Read GUVA-S12SD UV Sensor (Analog GPIO33 on ADC1)
   int uvMV = analogReadMilliVolts(UV_PIN);
   weather.uvMilliVolts = uvMV;
-  // GUVA-S12SD: 100 mV approx 1 UV Index
+  uvFresh = (uvMV >= 0 && uvMV <= 3300);
+  // APPROXIMATION ONLY: must be calibrated against a UV meter before treating as a true UV index.
   weather.uvIndex = constrain((float)uvMV / 100.0f, 0.0f, 15.0f);
 
   if (weather.uvIndex < 3.0f) {
@@ -811,6 +847,7 @@ void readSensors() {
   // Read Rain Sensor (Analog GPIO34)
   int rawRain = analogRead(RAIN_PIN);
   weather.rainRaw = rawRain;
+  rainFresh = (rawRain >= 0 && rawRain <= 4095);
 
   // Rain Fast-Attack, Smooth-Decay Envelope Filter
   // When droplets hit, reacts instantly. When drying, decays smoothly.
@@ -820,13 +857,18 @@ void readSensors() {
     weather.rainFiltered = (0.10f * rawRain) + (0.90f * weather.rainFiltered);
   }
 
-  // Read Battery Divider (GPIO35 with 10.04kΩ upper + 9.90kΩ lower divider)
-  int battRaw = analogRead(BATTERY_PIN);
+  // Read battery divider using calibrated ADC millivolts (more reliable than assuming exactly 3.3V).
+  // Divider: upper 10.04kΩ from battery positive to GPIO35; lower 9.90kΩ GPIO35 to GND.
+  int battPinMilliVolts = analogReadMilliVolts(BATTERY_PIN);
   const float dividerRatio = (10.04f + 9.90f) / 9.90f;
-  weather.batteryVoltage = (battRaw / 4095.0f) * 3.3f * dividerRatio;
+  if (battPinMilliVolts >= 0 && battPinMilliVolts <= 3300) {
+    weather.batteryVoltage = (battPinMilliVolts / 1000.0f) * dividerRatio;
+    batteryFresh = true;
+  }
 
-  // Flag testing/USB power state if battery voltage is below threshold or on 5V rail
-  weather.isUsbPower = (weather.batteryVoltage < 3.0f || weather.batteryVoltage >= 4.7f);
+  // GPIO35 measures the divider only; it cannot identify USB power. Never guess USB state.
+  // Keep isUsbPower false so the display does not falsely claim USB power.
+  weather.isUsbPower = false;
 }
 
 // ============================================================================
@@ -1266,7 +1308,7 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
 
       // Large Prominent Temperature
       {
-        String tempVal = String(weather.temperature, 1) + " C";
+        String tempVal = dhtTempFresh ? String(weather.temperature, 1) + " C" : "TEMP N/A";
         int tempX = (128 - (tempVal.length() * 12)) / 2;
 
         tft.setTextSize(2);
@@ -1314,7 +1356,7 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
 
       // Large Prominent Humidity
       {
-        String humVal = String(weather.humidity, 1) + " %";
+        String humVal = dhtHumFresh ? String(weather.humidity, 1) + " %" : "HUM N/A";
         int humX = (128 - (humVal.length() * 12)) / 2;
 
         tft.setTextSize(2);
@@ -1355,7 +1397,7 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
 
       // Prominent Pressure
       {
-        String pressVal = String(weather.pressure, 1) + " hPa";
+        String pressVal = pressureFresh ? String(weather.pressure, 1) + " hPa" : "PRESS N/A";
         int pressX = (128 - (pressVal.length() * 12)) / 2;
 
         tft.setTextSize(2);
@@ -1386,7 +1428,7 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
 
       // Prominent Lux
       {
-        String luxVal = String(weather.lux, 0) + " lx";
+        String luxVal = luxFresh ? String(weather.lux, 0) + " lx" : "LUX N/A";
         int luxX = (128 - (luxVal.length() * 12)) / 2;
 
         tft.setTextSize(2);
@@ -1425,7 +1467,7 @@ void drawTFTPage(uint8_t page, bool fullRedraw) {
       {
         tft.setTextSize(1);
         tft.setTextColor(ST7735_CYAN, COLOR_NAVY);
-        String uvStr = "UV: " + String(weather.uvIndex, 1) + " (" + weather.uvLevel + ")";
+        String uvStr = uvFresh ? "UV est: " + String(weather.uvIndex, 1) + " (" + weather.uvLevel + ")" : "UV SENSOR N/A";
         int uvX = (128 - (uvStr.length() * 6)) / 2;
         tft.setCursor(uvX > 0 ? uvX : 0, 102);
         tft.print(uvStr);
@@ -1663,8 +1705,8 @@ void handleTelemetryUpload() {
   }
 
   // Never upload uninitialized 0.0 telemetry packet to server
-  if (weather.temperature <= 0.0f || weather.humidity <= 0.0f) {
-    Serial.println("[Telemetry] Upload skipped: sensor readings not ready yet (0.0).");
+  if (!dhtTempFresh || !dhtHumFresh || weather.humidity < 2.0f || weather.humidity > 100.0f) {
+    Serial.println("[Telemetry] Upload skipped: latest DHT22 temperature/humidity sample is invalid.");
     return;
   }
 
